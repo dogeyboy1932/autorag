@@ -42,7 +42,15 @@ await page.evaluate(() => {
   window.__call = async (name, args) => {
     const tool = (await document.modelContext.getTools()).find((t) => t.name === name);
     if (!tool) return { __missing: name };
-    return JSON.parse(await document.modelContext.executeTool(tool, JSON.stringify(args ?? {})));
+    const raw = JSON.parse(await document.modelContext.executeTool(tool, JSON.stringify(args ?? {})));
+    /*
+     * Tools return an MCP CallToolResult envelope, because that is the only
+     * shape an MCP bridge will forward (see lib/webmcp/API-DELTA.md D12).
+     * Unwrap it exactly as a real client does — an earlier version of this
+     * harness read the bare payload and so never noticed the envelope was
+     * missing, while every agent connecting through MCP got empty results.
+     */
+    return raw?.structuredContent ?? (raw?.content?.[0]?.text ? JSON.parse(raw.content[0].text) : raw);
   };
 });
 

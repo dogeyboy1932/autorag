@@ -1,5 +1,7 @@
 # Things only you can do
 
+*(For picking up development, see `HANDOFF.md`. For how the app works, see `MANUAL.md`.)*
+
 Plain language. Claude cannot do any of these — they need your accounts, your
 browser, or your face and voice.
 

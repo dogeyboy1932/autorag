@@ -85,7 +85,7 @@ export async function registerGroup(
         try {
           const result = await inner(input);
           emit({ at: new Date().toISOString(), tool: tool.name, phase: 'returned', detail: result });
-          return result;
+          return toCallToolResult(result);
         } catch (err) {
           emit({ at: new Date().toISOString(), tool: tool.name, phase: 'failed', detail: String(err) });
           throw err;
@@ -125,6 +125,44 @@ export function normalizeInputSchema(schema: unknown): Record<string, unknown> |
     }
   }
   return undefined;
+}
+
+/**
+ * Wraps a tool's return value in an MCP `CallToolResult` envelope.
+ *
+ * **This is load-bearing, and its absence was invisible to direct testing.**
+ *
+ * `document.modelContext.executeTool()` serializes whatever a tool returns, so a
+ * bare object round-trips fine when you call it yourself from page script. But an
+ * agent does not do that — it connects through an MCP bridge (the MCP-B
+ * extension, `@mcp-b/chrome-devtools-mcp`), and that bridge forwards **only**
+ * results shaped as `{ content: [{ type: 'text', text }] }`. Anything else is
+ * dropped and the agent receives an empty response.
+ *
+ * Measured on Chrome 151 through `call_webmcp_tool`:
+ *
+ *   returns a bare object      -> (no output)
+ *   returns a plain string     -> (no output)
+ *   returns an MCP envelope    -> {"ok":true,...}
+ *
+ * So every tool result is wrapped here, centrally, rather than trusting fifteen
+ * tool bodies to remember. `structuredContent` carries the payload as data for
+ * clients that read it; `content` carries the same thing as text for those that
+ * do not.
+ */
+function toCallToolResult(value: unknown) {
+  // Already an envelope (or an error the tool shaped itself): pass through.
+  if (value && typeof value === 'object' && 'content' in (value as object)) {
+    return value;
+  }
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const result: Record<string, unknown> = { content: [{ type: 'text', text }] };
+  if (value && typeof value === 'object') result.structuredContent = value;
+  // Surface tool-level failures as MCP errors rather than silent successes.
+  if (value && typeof value === 'object' && (value as { ok?: unknown }).ok === false) {
+    result.isError = true;
+  }
+  return result;
 }
 
 /** D6: the spec defaults `title` to '', so `??` does not fall through. */

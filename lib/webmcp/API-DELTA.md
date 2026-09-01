@@ -181,6 +181,7 @@ while building.
 | `AbortController` unregistration | ✓ 1 tool → abort → 0 tools |
 | Works on native Chrome 151 | ✓ |
 | Works on `@mcp-b/global` polyfill | ✓ |
+| Round-trip through an MCP bridge (`call_webmcp_tool`) | ✓ *(only after D12)* |
 
 Not yet done, and still owed from build plan §6 Phase 0: the transformers.js model
 download from a deployed origin.
@@ -218,3 +219,44 @@ told to poll a tool finds it already registered; `sweepRetired()` only ever
 *removes* and runs from a React effect, after the call that changed the state has
 returned. Verified: approve now returns
 `{"ok":true,"approved_chunk_ids":[...],"message":"Approved 1 chunk(s)..."}`.
+
+---
+
+## D12. MCP bridges forward ONLY an MCP `CallToolResult` envelope
+
+**The most consequential finding in this file, and it was invisible to direct testing
+for an entire build.**
+
+`document.modelContext.executeTool()` serializes whatever a tool returns, so a bare
+object round-trips perfectly when page script calls it. Every test written against that
+path passed.
+
+But an agent never uses that path. It connects through an MCP bridge — the MCP-B Chrome
+extension, or `@mcp-b/chrome-devtools-mcp` — and **the bridge forwards only results
+shaped as an MCP `CallToolResult`.** Everything else is silently dropped: no error, no
+warning, just an empty response.
+
+Measured on Chrome 151 via `call_webmcp_tool`, three tools differing only in return
+shape:
+
+| `execute` returns | Result through the MCP bridge |
+|---|---|
+| `{ ok: true, shape: 'bare-object' }` | *(no output)* |
+| `'{"ok":true,...}'` (plain string) | *(no output)* |
+| `{ content: [{ type:'text', text }] }` | `{"ok":true,"shape":"mcp-envelope"}` |
+
+Autorag returned bare objects. So for most of this build **all 15 tools returned
+nothing to any agent connecting over MCP**, while every Puppeteer test passed and the
+UI worked correctly. The bug lived exactly in the gap between how it was tested and how
+it is used.
+
+**Fix:** `toCallToolResult()` in `src/webmcp/registry.ts` wraps every result centrally,
+in the same place that already wraps `execute` for the activity log — fifteen tool
+bodies cannot be trusted to each remember. It emits `content` (text, for clients that
+read it) plus `structuredContent` (the object, for clients that prefer data), and sets
+`isError: true` when the payload carries `ok: false`, so a structured failure surfaces
+as an MCP error rather than a silent success.
+
+**The transferable lesson:** test through the path the consumer actually uses. Calling
+`executeTool` from page script is not the same thing as being an agent, and the
+difference was a total, silent failure of the entire product surface.

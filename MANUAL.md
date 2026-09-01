@@ -198,6 +198,29 @@ the memory fills. That's deliberate, see §7.)
 **Test 5 is the interesting one.** A good tool surface doesn't just work — it stops an
 agent doing something destructive by accident, and tells it what to do instead.
 
+### Testing through the real MCP path (do this one)
+
+There are **two different ways** to reach the tools, and they are not equivalent:
+
+| Path | Who uses it | What it proves |
+|---|---|---|
+| `document.modelContext.executeTool()` from page script | test scripts | the tool logic works |
+| An MCP bridge (`call_webmcp_tool`) | **every actual agent** | the tool works *for an agent* |
+
+For most of this build only the first was tested, and every test passed — while all 15
+tools returned **empty responses** to any agent connecting over MCP. The bridge forwards
+only a specific result shape and silently drops anything else. See
+`lib/webmcp/API-DELTA.md` D12.
+
+So test the second path:
+
+> Using the chrome-devtools MCP server, call `autorag_get_stats` on http://localhost:3111
+> and show me exactly what came back.
+
+✅ **Pass:** a JSON object with `chunk_count`, `model_ready`, and so on.
+❌ **Fail:** *"completed with no output"* → results are not reaching agents. This is the
+failure mode to watch for after any change to how tools return values.
+
 ### The hardest test: does an agent understand the tools cold?
 
 Open a **fresh** agent session with no context and ask something vague:
@@ -208,6 +231,16 @@ Open a **fresh** agent session with no context and ask something vague:
 ✅ **Pass:** it works out the ingest-then-review flow from the tool descriptions alone.
 ❌ **Fail:** it calls the wrong tool, or invents arguments → **that's a documentation
 bug, not an agent bug.** The description needs to be clearer.
+
+**This test has never been run.** Everything verified so far either drives the tools by
+name from a script, or is driven by someone who wrote the descriptions and therefore
+already knows what they mean. Nobody has handed the tools to an agent that has never
+seen this project. Until that happens, treat "the tool descriptions are good" as an
+untested claim — and it is the specific claim this project is judged on.
+
+The same applies to `evals/autorag_eval.xml`. Its expected answers are now *measured*
+rather than guessed, which is an improvement, but the questions have never been given to
+an agent. It is a correct answer key for an exam nobody has sat.
 
 ---
 
@@ -308,6 +341,7 @@ the context.
 
 | I want to… | Look at |
 |---|---|
+| Pick up where the last session left off | `HANDOFF.md` |
 | Understand the tools | `lib/tool-design/TOOL-CONTRACT.md` |
 | Know what the browser actually does | `lib/webmcp/API-DELTA.md` — verified by running it, not by reading docs |
 | Record the demo video | `lib/demo/DEMO-SCRIPT.md` |

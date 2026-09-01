@@ -159,8 +159,12 @@ contradiction. The differing-figures test has to run first.
 
 ## New here?
 
-Read **[MANUAL.md](MANUAL.md)** — what this is, how to run it, and a ten-minute test
-plan in plain language. This README assumes you already know what WebMCP is.
+- **Picking up development?** Start with **[HANDOFF.md](HANDOFF.md)** — current state,
+  what is verified, what is not, and what is left.
+- **Want to use or test it?** Read **[MANUAL.md](MANUAL.md)** — what this is, how to run
+  it, and a ten-minute test plan in plain language.
+
+This README assumes you already know what WebMCP is.
 
 ## Running it
 
