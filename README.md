@@ -11,6 +11,10 @@ index the agent can query in any future session — with provenance attached.
 The human's job shrinks to one thing: **steering what the memory becomes.** The agent
 does the gathering and the first-pass screening.
 
+![Autorag: a staged passage in the review queue, flagged against an approved one, with
+the calling agent's verdict attached and the human's approve/reject buttons still
+unpressed](public/screenshot.png)
+
 ---
 
 ## Why this isn't "just paste the doc into context"
@@ -50,8 +54,9 @@ from the Hugging Face CDN.
 
 ## The tool surface
 
-14 tools, `autorag_{verb}_{noun}`, every field described, every error structured.
-Full schemas in [`lib/tool-design/TOOL-CONTRACT.md`](lib/tool-design/TOOL-CONTRACT.md).
+15 tools an agent can see: 14 registered imperatively, listed below, plus one the
+browser derives from markup. `autorag_{verb}_{noun}`, every field described, every error
+structured. Full schemas in [`lib/tool-design/TOOL-CONTRACT.md`](lib/tool-design/TOOL-CONTRACT.md).
 
 ### Ingestion
 | Tool | Read-only | Purpose |
@@ -75,7 +80,7 @@ Full schemas in [`lib/tool-design/TOOL-CONTRACT.md`](lib/tool-design/TOOL-CONTRA
 | Tool | Read-only | Purpose |
 |---|---|---|
 | `autorag_list_sources` | ✓ | Paginated, with chunk counts and stale flags. |
-| `autorag_get_stats` | ✓ | Counts, date range, model readiness. |
+| `autorag_get_stats` | ✓ | Counts, date range, embedding model and dimensions, readiness. |
 | `autorag_mark_stale` | ✗ | Demote without deleting. |
 | `autorag_forget_source` | ✗ | Destructive; requires `confirm: true`. |
 
@@ -141,14 +146,36 @@ top-1 21/21    no overclaim 3/3    no withhold 25/25
 `no withhold` is the load-bearing one: passages come back on every query, so the agent
 always has something to judge rather than being told to give up.
 
+### Evaluating the tool surface itself
+
+`evals/` holds eleven questions over a fixed seed corpus, each answerable only by
+calling the tools. They test **the contract, not the model**: if the right arguments are
+not guessable from a schema, or a result does not answer the question its description
+promises, that is a bug in the description.
+
+The run is written up in [`evals/RESULTS.md`](evals/RESULTS.md) — 11/11 against the
+answer key, and five defects in descriptions and payloads found and fixed by running it.
+It states its own limit plainly: the caller knew the repo, so it proves the arguments
+and the results, not the tool *choice*. Only an agent that has never seen this code can
+prove that.
+
+---
+
 ## Curation
 
 Screening **nominates; it never rules.** Cosine distance can tell you two passages are
 about the same thing — it cannot tell you they disagree. So:
 
-1. `screen.ts` shortlists pairs by similarity plus differing numeric claims.
+1. `screen.ts` shortlists pairs that are on the same subject and each carry numbers the
+   other does not.
 2. `autorag_adjudicate_conflict` hands the pair to the calling agent for a verdict.
 3. The verdict is attached to the review queue. **The human still decides.**
+
+Step 1 is a symmetric difference over numeric tokens, and the flag says exactly that —
+"this passage has 79; that one has 92, 500, 95" — rather than "the figures differ". The
+weaker sentence is the true one: a release year present in one passage and absent from
+the other lands in that list identically to two disagreeing review scores, and telling
+them apart means reading the claims around the numbers. That is step 2's job.
 
 A note on ordering, because it is counter-intuitive: contradictory passages are
 *textually near-identical* — "streaming on Max, 92%" against "streaming on Netflix,
@@ -224,8 +251,25 @@ components/     ReviewQueue (the human gate), CorpusView, ActivityLog, declarati
 src/rag/        embed · chunk · store · search · screen · ingest
 src/webmcp/     registry · lifecycle · errors · tools/
 lib/            API-DELTA (verified findings) · TOOL-CONTRACT (schemas) · demo script
-evals/          10 QA pairs over a fixed seed corpus
+evals/          11 QA pairs over a fixed seed corpus, plus RESULTS.md
 ```
+
+## Prior art and upstream
+
+The tool-naming rules in
+[`lib/tool-design/TOOL-CONTRACT.md`](lib/tool-design/TOOL-CONTRACT.md) come out of
+[`dogeyboy1932/NodeFlow`](https://github.com/dogeyboy1932/NodeFlow), where dashes in
+tool names broke compilation — hence `autorag_{verb}_{noun}`, snake_case throughout.
+
+Fixes from that work were contributed upstream to
+[`MiguelsPizza/WebMCP`](https://github.com/MiguelsPizza/WebMCP) as PRs
+[#22](https://github.com/MiguelsPizza/WebMCP/pull/22) and
+[#23](https://github.com/MiguelsPizza/WebMCP/pull/23).
+
+`@mcp-b/global` (the polyfill) and `@mcp-b/chrome-devtools-mcp` (the bridge every tool
+here was verified through) are that project's, and
+[`WebMCP-org/chrome-devtools-quickstart`](https://github.com/WebMCP-org/chrome-devtools-quickstart)
+is where the dev loop came from.
 
 ## License
 

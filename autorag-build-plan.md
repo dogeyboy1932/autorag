@@ -200,11 +200,11 @@ are the product being judged.
 - [ ] Visual polish — this is your video
 
 ### Phase 5 — Submission (treat as a deliverable, not a wrap-up)
-- [ ] README: architecture, tool table, setup, screenshot
-- [ ] MIT LICENSE, confirmed visible in GitHub About
-- [ ] Record video (budget 2–3h; always overruns)
-- [ ] Text description answering all four required questions verbatim
-- [ ] Cite the NodeFlow → MiguelsPizza/WebMCP upstream PRs (#22, #23)
+- [x] README: architecture, tool table, setup, screenshot
+- [x] MIT LICENSE in the repo — *visibility in GitHub's About panel needs the push*
+- [ ] Record video (budget 2–3h; always overruns) — script in `lib/demo/DEMO-SCRIPT.md`
+- [x] Text description answering all four required questions verbatim — `SUBMISSION.md`
+- [x] Cite the NodeFlow → MiguelsPizza/WebMCP upstream PRs (#22, #23) — README + SUBMISSION
 - [ ] Submit with buffer
 
 **Hard rule:** Phase 5 is not optional polish. Reserve real time for it.
@@ -244,6 +244,11 @@ Optional for submission, strong signal if included. After the corpus exists, wri
 Each: independent, read-only, requiring multiple tool calls, verifiable by string
 comparison, stable over time. Mentioning that you evaluated your own tool surface
 lands well with this judging panel.
+
+**Done (2026-09-01).** Eleven questions, run end to end through the MCP bridge, 11/11
+against the key — and five tool-contract defects found and fixed on the way. Write-up in
+`evals/RESULTS.md`, which also states what the run does not prove: the caller knew the
+repo, so tool *choice* is still unverified. See `HANDOFF.md` §5.
 
 ---
 

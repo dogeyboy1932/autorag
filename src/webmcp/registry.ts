@@ -92,7 +92,18 @@ export async function registerGroup(
         }
       },
     };
-    await ctx.registerTool(wrapped as never, { signal: controller.signal });
+    try {
+      await ctx.registerTool(wrapped as never, { signal: controller.signal });
+    } catch (err) {
+      // D13: `registerTool` rejects with AbortError if its signal fires while the
+      // call is still pending — which is exactly what a re-registration of the
+      // same group does, and what React StrictMode's double-invoked effect does on
+      // every dev page load. The abort is the intended outcome, so swallow it;
+      // rethrowing leaves an unhandled AbortError in the console of a page whose
+      // whole pitch is that its lifecycle handling is careful.
+      if (controller.signal.aborted) return false;
+      throw err;
+    }
     emit({ at: new Date().toISOString(), tool: tool.name, phase: 'registered' });
   }
   return true;

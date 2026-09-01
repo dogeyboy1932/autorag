@@ -260,3 +260,52 @@ as an MCP error rather than a silent success.
 **The transferable lesson:** test through the path the consumer actually uses. Calling
 `executeTool` from page script is not the same thing as being an agent, and the
 difference was a total, silent failure of the entire product surface.
+
+---
+
+## D13. `registerTool` rejects with `AbortError` if its signal fires mid-call
+
+**Verified 2026-09-01, Chrome 151, native.**
+
+`registerTool(tool, { signal })` returns a promise. If `signal` aborts while that
+promise is still pending, it **rejects** with `AbortError: signal is aborted without
+reason` rather than resolving or settling quietly.
+
+That sounds like an edge case. It is not: it happens on every page load in development.
+`registerGroup()` aborts a group's previous controller before installing a new one, so
+that ghost tools cannot survive a re-registration — and React StrictMode double-invokes
+the effect that calls it. Pass one is still awaiting `registerTool` when pass two aborts
+it. Nobody is left to catch the rejection, so it surfaces as:
+
+```
+Uncaught (in promise) AbortError: signal is aborted without reason
+    at abortGroup    (src/webmcp/registry.ts)
+    at registerGroup (src/webmcp/registry.ts)
+    at addMissing    (src/webmcp/lifecycle.ts)
+    at async ToolRegistrar.useEffect
+```
+
+Reproduce by opening the page with an `unhandledrejection` listener installed:
+
+```js
+window.__r = [];
+addEventListener('unhandledrejection', (e) => window.__r.push(String(e.reason)));
+// after load:  window.__r  ->  ["AbortError: signal is aborted without reason"]
+```
+
+It is cosmetic — the surviving registration is correct either way, and the bridge
+reports all 15 tools. But it is a permanent uncaught error in the console of a page
+whose whole argument is that its lifecycle handling is careful, and it would be the
+first thing anyone opening DevTools sees.
+
+**Fix:** `registerGroup()` catches around `registerTool` and, if its own controller has
+aborted, returns `false` instead of rethrowing — the abort is the intended outcome, not
+a failure. `addMissing()` in `lifecycle.ts` then takes its group flags from that return
+value rather than setting them optimistically on the next line, so a registration that
+declined (no model context) or was aborted mid-flight is retried rather than recorded
+as done.
+
+**Relationship to D11.** Same primitive, opposite direction. D11 is an abort destroying
+a tool *execution* and is unrecoverable, so the fix is to defer retraction. D13 is an
+abort destroying a tool *registration* and is benign, so the fix is to absorb it. Both
+came from assuming `abort()` is quiet.

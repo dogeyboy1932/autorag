@@ -41,13 +41,21 @@ export function fail(
   code: ErrorCode,
   message: string,
   details?: Record<string, unknown>,
+  /**
+   * Overrides the per-code default. Some failures have a better recovery than
+   * their code implies — a refused deletion should point at `autorag_mark_stale`,
+   * not at the generic INVALID_INPUT answer of "nothing helps". Naming the tool
+   * in the prose is not enough: agents route on the field.
+   */
+  suggestedNextTool?: string,
 ): StructuredError {
+  const suggestion = suggestedNextTool ?? SUGGESTIONS[code];
   return {
     ok: false,
     error: {
       code,
       message,
-      suggested_next_tool: SUGGESTIONS[code],
+      ...(suggestion ? { suggested_next_tool: suggestion } : {}),
       ...(details ? { details } : {}),
     },
   };

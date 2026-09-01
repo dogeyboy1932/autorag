@@ -80,10 +80,18 @@ are *textually near-identical* — "streaming on Max, 92%" against "streaming on
 contradiction before the contradiction check could run. The differing-figures test has
 to go first.
 
+## Prior art and upstream
+
+Tool-naming conventions came out of `dogeyboy1932/NodeFlow`, where dashes in tool names
+broke compilation — hence `autorag_{verb}_{noun}` throughout. Fixes from that work went
+upstream to `MiguelsPizza/WebMCP` as PRs #22 and #23. The polyfill (`@mcp-b/global`) and
+the bridge every tool here was verified through (`@mcp-b/chrome-devtools-mcp`) are that
+project's.
+
 ## Accomplishments we're proud of
 
-The curation loop closes. A bad source gets flagged on similarity plus differing
-figures, the agent rules on it, a human rejects it with a reason — and when that same
+The curation loop closes. A bad source gets flagged for being on the same subject as
+something known while carrying numbers that one does not, the agent rules on it, a human rejects it with a reason — and when that same
 material is proposed again, the memory hands back the human's own words explaining why
 it was turned down. That is memory with judgment in it, not just storage.
 
@@ -95,6 +103,15 @@ instructing an LLM to decline, based on information it does not have. A follow-u
 passages contain the runtime and the agent knows what "it" refers to. Autorag never can.
 Now it reports signals — match strength, which query terms are absent, whether the query
 leans on an unresolved reference — and always returns the passages. The agent judges.
+
+And the tool surface is evaluated, not just asserted. `evals/` holds eleven questions
+over a fixed seed corpus, each answerable only by calling the tools, and the run in
+`evals/RESULTS.md` scores 11/11 — but the useful output was the five defects it found on
+the way: a field an agent needed that only existed in another tool's prose, a recovery
+tool named in a message but missing from `suggested_next_tool`, a description promising a
+dry run where the runtime returns an error, and a conflict flag claiming the figures
+"differ" when all it had measured was that they were not the same set. Every one is a
+description bug, which is the category this surface lives or dies on.
 
 ## What we learned
 
@@ -125,12 +142,14 @@ locally, then stages them for human approval. Approved passages become searchabl
 every future session, with provenance attached to every result.
 
 **Tested surface.** Chrome 151 with `--enable-features=WebMCP`, native and polyfilled,
-on both the dev server and the production static export. We have not tested other
-WebMCP hosts and make no claim about them.
+on both the dev server and the production static export, and end-to-end through an MCP
+bridge rather than only from page script. We have not tested other WebMCP hosts and make
+no claim about them.
 
 **How does it use WebMCP?**
 14 tools registered imperatively on `document.modelContext`, plus one derived
-declaratively from an annotated HTML `<form>`. Tool groups are registered and retracted
+declaratively from an annotated HTML `<form>` — 15 in `getTools()`, which is where the
+page's own tool-count badge reads from rather than counting its own registrations. Tool groups are registered and retracted
 dynamically with `AbortController` as corpus state changes: approval tools exist only
 while something is staged, retrieval tools only while the corpus is non-empty. Every
 tool has an explicit input schema with per-field descriptions, an accurate

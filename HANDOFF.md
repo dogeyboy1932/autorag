@@ -2,7 +2,7 @@
 
 **Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
 WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 6 commits, **nothing pushed yet.**
+**Last worked:** 2026-09-01. **Branch:** `main`, 7 commits, **nothing pushed yet.**
 
 ---
 
@@ -10,14 +10,14 @@ WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 6 commits, all local
+git log --oneline          # 7 commits, all local
 pnpm install               # if node_modules is missing
 pnpm dev                   # http://localhost:3111
 pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25
 ```
 
 Then read, in order: **`MANUAL.md`** (what it is, how to test it) →
-**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 12 findings, all
+**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 13 findings, all
 verified by running them) → **`lib/tool-design/TOOL-CONTRACT.md`** (the 15 tool schemas).
 
 **Chrome must be launched as** `google-chrome --enable-features=WebMCP`.
@@ -99,7 +99,15 @@ gate is therefore in-page, which is the better design anyway.
 **D5 — `inputSchema` differs by Chrome version.** Native 149–153 returns a serialized
 string; 154+ and the polyfill return an object. Always use `normalizeInputSchema()`.
 
-**Two bugs in our own code, both caught only by measuring:**
+**D13 — `registerTool` rejects with `AbortError` if its signal fires mid-call.** Benign,
+but it left an uncaught rejection in the console on every dev load, because
+`registerGroup` aborts the previous controller and StrictMode double-invokes the effect.
+`registerGroup` now absorbs an abort of its own controller and returns `false`, and
+`addMissing` takes its group flags from that return value instead of setting them
+optimistically. Same primitive as D11, opposite direction: an aborted *execution* is
+unrecoverable, an aborted *registration* is fine.
+
+**Bugs in our own code, all caught only by measuring:**
 
 - *Contradiction detection was inverted.* Contradictory passages are textually
   near-identical ("Max, 92%" vs "Netflix, 79%" scores 0.93), so the near-duplicate
@@ -107,6 +115,8 @@ string; 154+ and the polyfill return an object. Always use `normalizeInputSchema
 - *Screening ignored pending material.* Agents harvest in bursts before anything is
   approved, so a four-source batch containing a flat contradiction produced **zero**
   flags. Now all three statuses are screened.
+- *Five defects in the tool contract*, found by actually running `evals/` through the
+  bridge. Written up in `evals/RESULTS.md`; the pattern is in §4 rule 5.
 
 ---
 
@@ -131,30 +141,43 @@ only what it is actually capable of.**
 4. **The review queue is steering, not security.** Do not pitch it as a defence against
    anything (`amendments.md` A1, A4).
 
+5. **A description describes what the runtime does, not what you wish it did.** Three of
+   the five eval defects were the same shape: `forget_source` promised a dry run and
+   returned an error; `get_stats` claimed to summarize the memory while omitting the
+   field an agent needed; a conflict flag said figures "differ" when all it had computed
+   was a set difference. Agents believe descriptions. When you change a payload, reread
+   the sentence that promises it.
+
 ---
 
 ## 5. What is NOT verified — the honest gap
 
-**No LLM has ever chosen a tool.** Every test either names the tool directly in a script
-or is driven by whoever wrote the descriptions. So this claim is untested:
+**Narrowed on 2026-09-01, not closed.**
+
+The eleven questions in `evals/autorag_eval.xml` have now been run end to end through
+the MCP bridge and score 11/11 — see `evals/RESULTS.md`, which also lists the five
+defects the run found. Every tool in the surface has been called through the path an
+agent actually connects over, including the rejection-memory round trip.
+
+What that does **not** establish is the one claim `amendments.md` A5.2 says the
+submission is won on:
 
 > An agent, seeing only the tool descriptions, picks the right tool with the right
 > arguments.
 
-That is exactly what `amendments.md` A5.2 says the submission is won on.
+The caller in that run had the repo in context. So the eval proves the arguments are
+guessable from the schemas and the results answer the questions — but not the *choice*
+of tool, which is the failure mode that overlapping descriptions cause. Nothing here can
+prove that except an agent that has never seen this code.
 
-`evals/autorag_eval.xml` has the same gap: its answers are now *measured* rather than
-guessed, but no agent has ever been given the questions. It is a correct answer key for
-an exam nobody has sat.
+**To close it:**
 
-**To close it** — the highest-value remaining work:
-
-1. Spawn a subagent with none of this context, point it at `http://localhost:3111`, and
-   ask only: *"Figure out what this page does and save something useful to it."*
-   Watch which tool it reaches for first and whether it invents arguments.
-2. Run the ten questions in `evals/autorag_eval.xml` through that agent and diff against
-   the answer key.
-3. Any wrong tool choice is a **description bug**, not an agent bug. Fix the wording.
+1. Point an agent with none of this context at `http://localhost:3111` and ask only:
+   *"Figure out what this page does and save something useful to it."* Watch which tool
+   it reaches for first and whether it invents arguments.
+2. Give it the eleven questions and diff against the answer key.
+3. Any wrong tool choice is a **description bug**, not an agent bug. Fix the wording —
+   that is what happened to all five defects in `RESULTS.md`.
 
 ---
 
@@ -206,6 +229,12 @@ an exam nobody has sat.
 | `how long is it` reports low confidence | Correct. The score measures wording overlap; the passage still contains the answer and the note says so. The agent decides. |
 | First page load takes ~60s | 25MB model download, cached afterwards. |
 | Backend reports `wasm` not `webgpu` | Fine. Headless Chrome has no GPU adapter. |
+| Header badge says 15 tools, `alwaysTools` etc. sum to 14 | Correct. The badge reads `getTools()`, so it counts the form-derived tool the browser adds without going through `registerGroup`. |
+| Screening flags a pair over years like 2024/1965 | Expected. The check is a set difference over numbers, and the flag now says exactly that. Adjudication is where meaning enters. |
+
+Changing `next.config.mjs` needs the dev server restarted; `devIndicators: false` was
+added there so the floating chip stays out of the video, and it will not take effect
+until you restart `pnpm dev`.
 
 ---
 
@@ -217,12 +246,12 @@ HANDOFF.md         ← this file
 HUMAN-TASKS.md     ← what only the user can do
 SUBMISSION.md      ← Devpost draft, four required questions answered
 README.md          ← technical README for judges
-lib/webmcp/API-DELTA.md        ← 12 verified findings. Highest-value doc.
+lib/webmcp/API-DELTA.md        ← 13 verified findings. Highest-value doc.
 lib/tool-design/TOOL-CONTRACT.md  ← all 15 tool schemas
 lib/demo/DEMO-SCRIPT.md        ← shot-by-shot video script
 lib/rag/chunking-notes.md      ← chunk sizes, normalization, backend choice
 bench/             ← retrieval benchmark (pnpm bench)
-evals/             ← 11 QA pairs + seed corpus (never run through an agent)
+evals/             ← 11 QA pairs + seed corpus + RESULTS.md (run, but not blind)
 probes/            ← standalone pages used to establish API-DELTA facts
 src/rag/           ← embed · chunk · store · search · lexical · screen · ingest · bus
 src/webmcp/        ← registry · lifecycle · errors · tools/

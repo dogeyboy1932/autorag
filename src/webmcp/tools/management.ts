@@ -8,7 +8,7 @@
  */
 
 import type { ModelContextTool } from '@mcp-b/webmcp-types';
-import { EMBEDDING_MODEL, isReady } from '@/src/rag/embed';
+import { EMBEDDING_DIM, EMBEDDING_MODEL, isReady } from '@/src/rag/embed';
 import {
   allChunks,
   allSources,
@@ -77,7 +77,7 @@ export const listSourcesTool = {
 export const getStatsTool = {
   name: 'autorag_get_stats',
   description:
-    'Summarize the state of the memory: how many passages are approved, pending and rejected, how many sources, the date range, and whether the embedding model has finished loading. Cheap orientation call — use it first in a session to see whether there is anything worth searching.',
+    'Summarize the state of the memory: how many passages are approved, pending and rejected, how many sources, the date range, which embedding model is in use and its vector dimensions, and whether that model has finished loading. Cheap orientation call — use it first in a session to see whether there is anything worth searching.',
   inputSchema: { type: 'object', properties: {} },
   annotations: { readOnlyHint: true },
   execute: () =>
@@ -100,6 +100,7 @@ export const getStatsTool = {
         newest_ingest: dates[dates.length - 1] ?? null,
         conflict_count: conflictCount,
         embedding_model: EMBEDDING_MODEL,
+        embedding_dimensions: EMBEDDING_DIM,
         model_ready: isReady(),
       };
     }),
@@ -143,7 +144,7 @@ export const markStaleTool = {
 export const forgetSourceTool = {
   name: 'autorag_forget_source',
   description:
-    'Permanently delete a source and every passage from it. This cannot be undone. Prefer autorag_mark_stale unless the person has explicitly asked for deletion. Requires confirm: true — call it once without confirm to see what would be removed.',
+    'Permanently delete a source and every passage from it. This cannot be undone. Prefer autorag_mark_stale unless the person has explicitly asked for deletion. Requires confirm: true; calling it without confirm deletes nothing and comes back as an INVALID_INPUT error listing what would have been removed, so treat that error as the preview rather than a failure.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -151,7 +152,7 @@ export const forgetSourceTool = {
       confirm: {
         type: 'boolean',
         description:
-          'Must be true to actually delete. Omit or set false for a dry run reporting what would be removed.',
+          'Must be true to actually delete. Omit or set false to preview: nothing is deleted and the INVALID_INPUT error names the source and how many passages would go.',
       },
     },
     required: ['source_id'],
@@ -168,6 +169,7 @@ export const forgetSourceTool = {
           'INVALID_INPUT',
           `Deletion requires confirm: true. This would permanently remove "${source.title}" and ${chunks.length} passage(s). Consider autorag_mark_stale instead.`,
           { source_id: source.id, title: source.title, chunks_that_would_be_deleted: chunks.length },
+          'autorag_mark_stale',
         );
       }
 

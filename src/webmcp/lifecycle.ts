@@ -32,13 +32,14 @@ let inFlight: Promise<void> | null = null;
 async function addMissing(): Promise<void> {
   const counts = await countByStatus();
 
+  // Take the flag from the return value, not from reaching the next line:
+  // registration can decline (no model context) or be aborted mid-flight, and a
+  // flag set optimistically would suppress the retry that should follow.
   if (counts.pending > 0 && !approvalOn) {
-    await registerGroup('approval', approvalTools as never);
-    approvalOn = true;
+    approvalOn = await registerGroup('approval', approvalTools as never);
   }
   if (counts.approved > 0 && !retrievalOn) {
-    await registerGroup('retrieval', retrievalTools as never);
-    retrievalOn = true;
+    retrievalOn = await registerGroup('retrieval', retrievalTools as never);
   }
 }
 

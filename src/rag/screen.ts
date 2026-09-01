@@ -11,7 +11,7 @@
  * contradictions" is the kind of overclaim `amendments.md` A3 warns against.
  */
 
-import type { Chunk, Conflict, Source } from '@/src/types';
+import type { Chunk, Conflict, ConflictKind, Source } from '@/src/types';
 import { cosine } from './search';
 
 /** At or above this, the passage is already in the corpus. */
@@ -39,17 +39,25 @@ function daysBetween(a: string, b: string): number {
 }
 
 /**
- * Two passages on the same subject whose numeric claims differ are the cheapest
- * honest contradiction signal available offline. It over-nominates — that is the
- * intent, since the agent and the human both get a say afterwards.
+ * Two passages on the same subject that each carry figures the other does not are
+ * the cheapest honest contradiction signal available offline. It over-nominates —
+ * that is the intent, since the agent and the human both get a say afterwards.
+ *
+ * Note what this is and is not. It is a symmetric difference over numeric tokens:
+ * a release year present in one passage and absent from the other lands here
+ * exactly like two disagreeing review scores do. Deciding which of those is a
+ * disagreement takes reading the sentences around the numbers, which is the
+ * agent's job. So the two sides are reported separately and the wording says
+ * "figures the other does not carry" rather than "the figures differ" — the
+ * stronger claim is one this function is not in a position to make.
  */
-function numericDisagreement(a: string, b: string): string[] {
+function numericDisagreement(a: string, b: string): { inNew: string[]; inOther: string[] } | null {
   const [ta, tb] = [factualTokens(a), factualTokens(b)];
-  if (ta.size === 0 || tb.size === 0) return [];
+  if (ta.size === 0 || tb.size === 0) return null;
   const onlyA = [...ta].filter((t) => !tb.has(t));
   const onlyB = [...tb].filter((t) => !ta.has(t));
-  if (onlyA.length === 0 || onlyB.length === 0) return [];
-  return [...onlyA.slice(0, 3), ...onlyB.slice(0, 3)];
+  if (onlyA.length === 0 || onlyB.length === 0) return null;
+  return { inNew: onlyA.slice(0, 3), inOther: onlyB.slice(0, 3) };
 }
 
 export interface ScreenInput {
@@ -88,9 +96,11 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
           kind: 'duplicate',
           againstChunkId: chunk.id,
           similarity,
-          detail: `Closely matches material previously rejected${
-            chunk.rejectionReason ? `: "${chunk.rejectionReason}"` : ''
-          }.`,
+          // The reason is a human's own sentence and already ends in punctuation;
+          // only the bare form needs a period of its own.
+          detail: chunk.rejectionReason
+            ? `Closely matches material previously rejected: "${chunk.rejectionReason}"`
+            : 'Closely matches material previously rejected.',
         });
       }
       continue;
@@ -112,18 +122,22 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
      * contradiction *disagrees* with it. Same similarity, opposite handling.
      */
     const differing =
-      source.url !== input.source.url ? numericDisagreement(input.text, chunk.text) : [];
+      source.url !== input.source.url ? numericDisagreement(input.text, chunk.text) : null;
 
-    if (differing.length > 0) {
+    if (differing) {
       conflicts.push({
         kind: 'contradiction',
         againstChunkId: chunk.id,
         similarity,
-        detail: `Same subject as ${source.title}${
-          staged ? ' (also awaiting review)' : ''
-        }, but the figures differ (${differing.join(
-          ', ',
-        )}). Nominated for adjudication — not yet judged.`,
+        detail:
+          // Time-scoped on purpose: the detail is persisted with the chunk, and the
+          // passage it names can be approved five seconds later. A bare "(also
+          // awaiting review)" would then be a false statement sitting in the queue.
+          `Same subject as ${source.title}${staged ? ' (itself awaiting review when this was screened)' : ''}, ` +
+          `and each carries figures the other does not — this passage has ` +
+          `${differing.inNew.join(', ')}; that one has ${differing.inOther.join(', ')}. ` +
+          `Whether that is a disagreement takes reading the claims around the numbers. ` +
+          `Nominated for adjudication — not yet judged.`,
       });
       continue;
     }
@@ -134,7 +148,7 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
         againstChunkId: chunk.id,
         similarity,
         detail: staged
-          ? `Identical to another passage already staged from ${source.title}.`
+          ? `Identical to a passage from ${source.title} that was also awaiting review when this was screened.`
           : `Already in the corpus from ${source.title}.`,
       });
       continue;
@@ -185,13 +199,20 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
   return [...best.values()];
 }
 
+/** "1 near duplicate" / "3 near duplicates" — this string is read by people. */
+function label(kind: ConflictKind, n: number): string {
+  const singular = kind.replace('_', ' ');
+  return n === 1 ? singular : `${singular}s`;
+}
+
 export function summarizeConflicts(conflicts: Conflict[]): string {
   if (conflicts.length === 0) return 'No conflicts detected.';
   const counts = conflicts.reduce<Record<string, number>>((acc, c) => {
     acc[c.kind] = (acc[c.kind] ?? 0) + 1;
     return acc;
   }, {});
-  return Object.entries(counts)
-    .map(([kind, n]) => `${n} ${kind.replace('_', ' ')}`)
-    .join(', ');
+  // Ends with a period because callers splice it into a longer message.
+  return `${Object.entries(counts)
+    .map(([kind, n]) => `${n} ${label(kind as ConflictKind, n)}`)
+    .join(', ')}.`;
 }

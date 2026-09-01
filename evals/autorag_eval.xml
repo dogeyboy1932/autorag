@@ -18,8 +18,8 @@
   </qa_pair>
 
   <qa_pair>
-    <question>Which embedding model does Autorag use, and how many dimensions do its vectors have?</question>
-    <answer>Xenova/all-MiniLM-L6-v2, 384 dimensions</answer>
+    <question>Which embedding model does Autorag use, how many dimensions do its vectors have, and has it finished loading?</question>
+    <answer>Xenova/all-MiniLM-L6-v2, 384 dimensions, model_ready true</answer>
   </qa_pair>
 
   <qa_pair>
@@ -48,12 +48,12 @@
   </qa_pair>
 
   <qa_pair>
-    <question>Attempt to forget the source titled "Arrival - production notes" without confirming. What error code comes back?</question>
-    <answer>INVALID_INPUT</answer>
+    <question>Attempt to forget the source titled "Dune: Part Two - aggregate scores (secondary aggregator)" without confirming. What error code comes back, and how many passages does it say would be removed?</question>
+    <answer>INVALID_INPUT, 1 passage</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Try to delete a source without confirming. Which tool does the error tell you to consider using instead?</question>
+    <question>Try to delete a source without confirming. Which tool does the error's suggested_next_tool field name?</question>
     <answer>autorag_mark_stale</answer>
   </qa_pair>
 

@@ -34,10 +34,16 @@ won or lost.
 | `EMPTY_CORPUS` | Nothing approved yet | `autorag_ingest_passage` |
 | `NOTHING_PENDING` | Review queue empty | `autorag_get_stats` |
 | `NOT_FOUND` | Unknown id | `autorag_list_sources` |
-| `INVALID_INPUT` | Failed schema/semantic validation | — |
+| `INVALID_INPUT` | Failed schema/semantic validation | — (per-call override) |
 | `DUPLICATE` | Passage already indexed | `autorag_check_conflicts` |
 | `MODEL_NOT_READY` | Embedding model still warming | `autorag_get_stats` |
 | `INTERNAL` | Unexpected throw | — |
+
+A call site may override the per-code default by passing a fourth argument to `fail()`,
+for a failure whose best recovery its code cannot know. The refused deletion below is
+the only current use: `INVALID_INPUT` has no general answer, but *that* one is
+`autorag_mark_stale`. Naming the tool in the prose is not enough — agents route on the
+field.
 
 ---
 
@@ -155,8 +161,9 @@ Paginated sources with chunk counts, ingest dates, and stale flags.
 
 ## `autorag_get_stats` — `readOnlyHint: true`
 
-`{chunk_count, approved, pending, rejected, source_count, oldest_ingest, newest_ingest,
-conflict_count, embedding_model, model_ready}`.
+`{chunk_count, approved, pending, rejected, source_count, stale_source_count,
+oldest_ingest, newest_ingest, conflict_count, embedding_model, embedding_dimensions,
+model_ready}`.
 
 Cheap orientation call. `model_ready: false` means embeddings are still warming and
 ingest/search will return `MODEL_NOT_READY`.
@@ -173,10 +180,14 @@ part of the memory.
 
 Permanently removes a source and all its chunks. Irreversible.
 
-Requires `confirm: true` alongside `source_id`; omitting it returns `INVALID_INPUT`
-explaining that confirmation is required. Since `requestUserInteraction` does not
-exist (API-DELTA D4), this explicit confirmation field plus the UI's own confirm step
-is the whole guard.
+Requires `confirm: true` alongside `source_id`. Omitting it deletes nothing and returns
+`INVALID_INPUT` naming the source and the chunk count that would go, with
+`suggested_next_tool: "autorag_mark_stale"`. That error **is** the dry run — the
+description says so explicitly, because a description that promises a preview while the
+runtime returns `ok: false` invites an agent to report the deletion as failed and stop.
+
+Since `requestUserInteraction` does not exist (API-DELTA D4), this explicit confirmation
+field plus the UI's own confirm step is the whole guard.
 
 ---
 
