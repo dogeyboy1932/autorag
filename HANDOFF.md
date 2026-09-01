@@ -2,7 +2,7 @@
 
 **Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
 WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 7 commits, **nothing pushed yet.**
+**Last worked:** 2026-09-01. **Branch:** `main`, 8 commits, **nothing pushed yet.**
 
 ---
 
@@ -10,7 +10,7 @@ WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 7 commits, all local
+git log --oneline          # 8 commits, all local
 pnpm install               # if node_modules is missing
 pnpm dev                   # http://localhost:3111
 pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25

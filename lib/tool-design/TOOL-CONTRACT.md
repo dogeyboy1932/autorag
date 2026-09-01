@@ -1,4 +1,7 @@
-# TOOL-CONTRACT — Autorag's 14 tools
+# TOOL-CONTRACT — Autorag's 15 tools
+
+14 registered imperatively and specified below, plus `autorag_submit_passage_form`,
+which the browser derives from an annotated `<form>` (see the declarative section).
 
 **Written before the implementation, deliberately.** `autorag-build-plan.md` §5:
 *the schemas are the product being judged.* `amendments.md` A5.2 is blunter — with

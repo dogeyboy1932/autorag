@@ -320,7 +320,7 @@ the context.
 | Searching returns nothing after marking something stale | Stale sources are hidden by default. The result tells the agent to retry with `include_stale`. |
 | A one-word search scores 0.2 and still finds the right thing | Normal. Short queries always score low. Trust the **confidence** label, not the number. |
 | Backend says `wasm` not `webgpu` | Fine. WASM is the fallback and is a bit slower. Headless Chrome always uses it. |
-| Conflict lists years as "differing figures" | It over-flags on purpose. Better to surface too much for you to dismiss than to miss a real contradiction. |
+| Conflict lists years among the numbers | It over-flags on purpose. Better to surface too much for you to dismiss than to miss a real contradiction — which is why the flag says the two passages carry numbers the other does not, rather than claiming they disagree. |
 
 ---
 

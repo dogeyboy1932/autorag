@@ -62,5 +62,7 @@ badge at all. Measured: 0 contradictions flagged on the four-source seed batch.
 So `screenChunk` considers all three statuses — approved (the established corpus),
 pending (the rest of this harvest), and rejected (so material the human already turned
 down is flagged rather than silently re-proposed). Conflicts against staged material
-say so in their detail text, since "also awaiting review" changes what the human should
-do about it. Same seed batch after the fix: 3 contradictions flagged.
+say so in their detail text, since being flagged against something that is not itself
+approved yet changes what the human should do about it. That clause is time-scoped —
+"awaiting review when this was screened" — because the detail is persisted with the
+chunk and the passage it names can be approved seconds later. Same seed batch after the fix: 3 contradictions flagged.
