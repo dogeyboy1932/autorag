@@ -298,6 +298,33 @@ try {
       : `no preview (${probe.error ?? 'unknown'})`,
   );
 
+  /*
+   * The loop a person actually does: keep something, approve it, ask for it back.
+   * Everything before this proved the plumbing; this proves the product.
+   */
+  const loop = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'l', request: req }, res),
+      );
+    const pending = (await send({ kind: 'listPending' })).data;
+    if (!pending?.length) return { error: 'nothing staged to approve' };
+    await send({ kind: 'approve', chunkIds: pending.map((p) => p.chunk_id) });
+    const answer = (await send({ kind: 'answer', question: 'What is example.com reserved for?' })).data;
+    return {
+      approved: pending.length,
+      hits: answer?.hits?.length ?? 0,
+      confidence: answer?.confidence,
+      cites: answer?.hits?.[0]?.source?.url ?? null,
+      snippet: answer?.hits?.[0]?.text?.slice(0, 60) ?? null,
+    };
+  });
+  log(
+    'keep → approve → recall returns the passage with its source',
+    loop.hits > 0 && !!loop.cites,
+    loop.error ?? `${loop.hits} passage(s), confidence ${loop.confidence}, cites ${loop.cites}`,
+  );
+
   const managed = await panel.evaluate(async () => {
     const send = (req) =>
       new Promise((res) =>
