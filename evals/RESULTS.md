@@ -8,6 +8,9 @@ answer a question; every figure below came back through `call_webmcp_tool`.
 **11/11 match the answer key.** Five description or payload defects were found and
 fixed in the process — which is the point of the exercise, not a side effect of it.
 
+A second run against the build plan's per-phase acceptance gates followed; it found that
+the declarative `<form>` tool had never actually worked. See *Second run* below.
+
 ## Standing caveat: this is not a blind agent run
 
 The caller had the repo in context. That rules out the single most valuable failure
@@ -79,6 +82,64 @@ punctuation. All three fixed.
 One further defect surfaced while running this and is written up separately as
 `API-DELTA.md` D13: an `AbortError` from `registerTool` was reaching the page as an
 uncaught rejection on every load.
+
+## Second run — 2026-09-01, the acceptance gates
+
+Re-run from an empty memory to check the build plan's own per-phase gates rather than
+the question set. Everything below was driven through `call_webmcp_tool`; the UI was
+touched only where the gate is about the UI.
+
+| Gate | Result |
+|---|---|
+| **Phase 1** — paste → search → correct chunk | ✅ and survives reload: 4 chunks, 4 sources intact after a full page load |
+| **Phase 2** — agent ingests and retrieves with no UI interaction | ✅ ingest ×4, adjudicate, reject, approve ×3, search — zero clicks |
+| **Phase 3** — a bad source visibly gets caught and rejected | ✅ see below |
+| **Phase 4** — corpus management, declarative form | ⚠️ management ✅; the declarative form was **broken** — see D14 |
+| **§7 demo arc** — wrong → right with provenance | ✅ see below |
+
+**The demo arc, measured.** With an empty memory, `autorag_answer_with_sources` does not
+exist — the retrieval group is not registered, so the agent is not offered a search tool
+against nothing. Four passages ingested; the fourth, an undated blog claiming a free
+Netflix stream, was flagged against the JustWatch listing, ruled on by the agent, and
+rejected with a reason. The other three were approved. The same question then returned
+Max and 92 percent with source URLs and ingest timestamps, and the rejected claim
+appears nowhere in the answer. Re-proposing the blog returns
+`recommendation: "skip_duplicate"` and the human's own rejection sentence.
+
+**"Nothing leaves the device", measured.** After the full cycle,
+`performance.getEntriesByType('resource')` reports 28 requests, **0 of them
+cross-origin**. On a cold profile there is exactly one external origin, the Hugging Face
+CDN, for the one-time model download.
+
+### What this run found
+
+**The declarative `<form>` tool did not work.** It listed correctly in `getTools()` and
+had been recorded as verified on that basis. Calling it hung for 120 seconds and staged
+nothing. Three causes, all now fixed, written up as `API-DELTA.md` D14 — and the last of
+them was D12 repeating itself on a path that had never been exercised.
+
+Three more, from the same session:
+
+- The form-derived tool bypasses `registerGroup`, so nothing logged it. Three agent
+  calls landed while the activity panel read "No agent calls yet."
+- `event.currentTarget` is null after the first `await`, so the handler's own
+  `form.reset()` threw into its catch block and a **successful** human submission
+  rendered an error string.
+- The numeric-token regex matched the `1,` in "March 1, 2024", so conflict details read
+  "this passage has 1,".
+
+### One honest limit, quantified
+
+Screening caught **one of the two** real disagreements in that bad blog post. It flagged
+the streaming conflict against JustWatch (cosine 0.74) but not the 79-vs-92 score
+conflict against Rotten Tomatoes, which sits at **0.659** — below the `SAME_TOPIC_AT`
+threshold of **0.72**, so the pair was never considered the same subject and never
+nominated.
+
+That is recall, not correctness: the design says screening nominates and never rules,
+and the human still caught it. But it is a measured miss, not a hypothetical one.
+Lowering `SAME_TOPIC_AT` to ~0.65 would have flagged it, at a precision cost nothing
+here has measured. Left as it is deliberately, and recorded so the number is known.
 
 ## Reproducing
 

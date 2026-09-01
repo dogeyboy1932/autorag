@@ -309,3 +309,57 @@ as done.
 a tool *execution* and is unrecoverable, so the fix is to defer retraction. D13 is an
 abort destroying a tool *registration* and is benign, so the fix is to absorb it. Both
 came from assuming `abort()` is quiet.
+
+---
+
+## D14. A declarative `<form>` tool is discoverable long before it is callable
+
+**Verified 2026-09-01, Chrome 151, native. This one was shipped broken.**
+
+`getTools()` listed `autorag_submit_passage_form` with a correct input schema from the
+day the annotated `<form>` went in, and that was taken as proof the declarative path
+worked. It was not. **Calling** the tool through the MCP bridge hung until the bridge
+timed out at 120 seconds and staged nothing:
+
+```
+call_webmcp_tool autorag_submit_passage_form { … }
+-> Runtime.callFunctionOn timed out
+-> autorag_get_stats: chunk_count unchanged
+```
+
+Three separate things are required, and the form satisfied none of them:
+
+**1. `toolautosubmit`, or nobody ever submits.** Without the attribute the runtime
+fills the controls, focuses the first enabled submit button, and *waits for a person to
+click it*. An agent call therefore blocks forever. With it, the runtime runs native
+constraint validation and calls `requestSubmit()`.
+
+**2. In React it must be written `toolautosubmit=""`.** React drops an unknown attribute
+whose value is the boolean `true`, so the JSX shorthand never reaches the DOM. Typed as
+`?: ''` in `types/webmcp-jsx.d.ts` so the compiler enforces it.
+
+**3. `SubmitEvent.respondWith()`, or the result never reaches the agent.** An
+agent-triggered submit sets `SubmitEvent.agentInvoked`; `respondWith(result)` is the
+only channel back. Both must be touched synchronously during dispatch. A handler that
+merely calls `preventDefault()` and does its work resolves the agent's call with
+nothing.
+
+And then **D12 applies to this path too**, which is how it was missed a second time:
+once `respondWith` was wired up the call returned instantly and the bridge still
+reported *"completed with no output"*, because a bare object is not a `CallToolResult`.
+`toCallToolResult()` is now exported from `src/webmcp/registry.ts` and the form uses the
+identical envelope.
+
+Two smaller things fell out of the same test:
+
+- The form-derived tool does not pass through `registerGroup`, so nothing wrapped its
+  `execute` for the activity log. Three agent calls landed while the panel still read
+  *"No agent calls yet."* `recordActivity()` is now exported for exactly this one caller.
+- `event.currentTarget` is null after the first `await` — the handler's own
+  `form.reset()` was throwing into its catch block, so a **successful** human submission
+  displayed an error string. Capture the element before awaiting.
+
+**The transferable lesson is D12's, one level up.** Appearing in `getTools()` is not
+evidence a tool works, in the same way that a passing page-script test was not evidence
+a result reaches an agent. The only evidence is a call through the consumer's path that
+comes back with the right answer *and* leaves the right state behind.

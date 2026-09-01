@@ -28,7 +28,9 @@ export const STALE_SKEW_DAYS = 180;
  * about. The decimal part is only matched when digits actually follow, so a
  * number ending a sentence yields "92" rather than "92.".
  */
-const FACTUAL_TOKEN = /\$?\d[\d,]*(?:\.\d+)?%?/g;
+// The trailing digit is load-bearing: `\d[\d,]*` also matches the "1," in
+// "March 1, 2024", and a conflict detail then reads "this passage has 1,".
+const FACTUAL_TOKEN = /\$?\d(?:[\d,]*\d)?(?:\.\d+)?%?/g;
 
 function factualTokens(text: string): Set<string> {
   return new Set(text.match(FACTUAL_TOKEN) ?? []);

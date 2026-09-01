@@ -86,6 +86,9 @@ structured. Full schemas in [`lib/tool-design/TOOL-CONTRACT.md`](lib/tool-design
 
 Plus `autorag_submit_passage_form`, derived by the browser from an annotated HTML
 `<form>` — the **declarative** API, demonstrating both registration paths in one repo.
+It is verified by being *called* through an MCP bridge, not by appearing in `getTools()`:
+it listed correctly for most of this build while being completely non-functional
+([API-DELTA D14](lib/webmcp/API-DELTA.md)).
 
 ### Dynamic registration
 

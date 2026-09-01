@@ -2,7 +2,7 @@
 
 **Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
 WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 8 commits, **nothing pushed yet.**
+**Last worked:** 2026-09-01. **Branch:** `main`, 9 commits, **nothing pushed yet.**
 
 ---
 
@@ -10,14 +10,14 @@ WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 8 commits, all local
+git log --oneline          # 9 commits, all local
 pnpm install               # if node_modules is missing
 pnpm dev                   # http://localhost:3111
 pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25
 ```
 
 Then read, in order: **`MANUAL.md`** (what it is, how to test it) →
-**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 13 findings, all
+**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 14 findings, all
 verified by running them) → **`lib/tool-design/TOOL-CONTRACT.md`** (the 15 tool schemas).
 
 **Chrome must be launched as** `google-chrome --enable-features=WebMCP`.
@@ -67,8 +67,13 @@ pnpm bench    top-1 21/21    no overclaim 3/3    no withhold 25/25
 
 Also verified by running: cross-session persistence across a full browser restart,
 stale demotion at exactly 0.60, structured errors on every failure path, dynamic tool
-registration through the MCP bridge, and the declarative `<form>` tool appearing in
-`getTools()` on native Chrome.
+registration through the MCP bridge, and — as of 2026-09-01 — the declarative `<form>`
+tool actually **called** through the bridge, returning a result and staging a passage.
+
+That last one had been recorded here as verified when all that had been checked was that
+it *appeared* in `getTools()`. It was in fact broken: an agent's call hung for 120s and
+staged nothing. See API-DELTA D14. Treat "appears in `getTools()`" as evidence of
+nothing.
 
 ---
 
@@ -99,6 +104,13 @@ gate is therefore in-page, which is the better design anyway.
 **D5 — `inputSchema` differs by Chrome version.** Native 149–153 returns a serialized
 string; 154+ and the polyfill return an object. Always use `normalizeInputSchema()`.
 
+**D14 — a declarative `<form>` tool is discoverable long before it is callable.** The
+one that had been wrongly marked verified. `toolautosubmit` (spelled `toolautosubmit=""`
+in React, or it never reaches the DOM) is what makes anything submit at all;
+`SubmitEvent.respondWith()` is the only channel back to the agent; and D12's envelope
+applies on this path too. Missing any one of the three yields a tool that lists
+perfectly and does nothing.
+
 **D13 — `registerTool` rejects with `AbortError` if its signal fires mid-call.** Benign,
 but it left an uncaught rejection in the console on every dev load, because
 `registerGroup` aborts the previous controller and StrictMode double-invokes the effect.
@@ -117,6 +129,10 @@ unrecoverable, an aborted *registration* is fine.
   flags. Now all three statuses are screened.
 - *Five defects in the tool contract*, found by actually running `evals/` through the
   bridge. Written up in `evals/RESULTS.md`; the pattern is in §4 rule 5.
+- *The declarative form was never called, only listed* — D14 above. Alongside it: the
+  form-derived tool was invisible to the activity log, `event.currentTarget` was null
+  after the first `await` so a successful human submit rendered an error, and the
+  numeric-token regex turned "March 1, 2024" into a figure called `1,`.
 
 ---
 
@@ -141,7 +157,13 @@ only what it is actually capable of.**
 4. **The review queue is steering, not security.** Do not pitch it as a defence against
    anything (`amendments.md` A1, A4).
 
-5. **A description describes what the runtime does, not what you wish it did.** Three of
+5. **A tool is not verified until a call through the bridge returns the right answer
+   AND leaves the right state behind.** Both halves. The declarative form listed
+   correctly in `getTools()` for the whole build and was recorded as verified on that
+   basis; it hung on every actual call (D14). D12 was the same mistake at a lower level.
+   The check in §10 exists because of this and is not optional.
+
+6. **A description describes what the runtime does, not what you wish it did.** Three of
    the five eval defects were the same shape: `forget_source` promised a dry run and
    returned an error; `get_stats` claimed to summarize the memory while omitting the
    field an agent needed; a conflict flag said figures "differ" when all it had computed
@@ -246,7 +268,7 @@ HANDOFF.md         ← this file
 HUMAN-TASKS.md     ← what only the user can do
 SUBMISSION.md      ← Devpost draft, four required questions answered
 README.md          ← technical README for judges
-lib/webmcp/API-DELTA.md        ← 13 verified findings. Highest-value doc.
+lib/webmcp/API-DELTA.md        ← 14 verified findings. Highest-value doc.
 lib/tool-design/TOOL-CONTRACT.md  ← all 15 tool schemas
 lib/demo/DEMO-SCRIPT.md        ← shot-by-shot video script
 lib/rag/chunking-notes.md      ← chunk sizes, normalization, backend choice
@@ -268,9 +290,19 @@ pnpm build
 pnpm bench                    # 21/21, 3/3, 25/25
 ```
 
-And then, because `pnpm bench` cannot catch a D12-class failure, call one tool through
-the **MCP bridge** and confirm real JSON comes back:
+And then, because `pnpm bench` cannot catch a D12- or D14-class failure, call **both
+registration paths** through the MCP bridge:
 
 > Using chrome-devtools, call `autorag_get_stats` on http://localhost:3111.
+> Then call `autorag_submit_passage_form` with a real passage, and check
+> `autorag_get_stats` again to confirm `pending` went up.
 
-"Completed with no output" means results are not reaching agents.
+Three failure signatures, all of which have happened here:
+
+| What you see | What it means |
+|---|---|
+| "Completed with no output" | Results are not reaching agents — D12 envelope missing. |
+| The call hangs until the 120s timeout | Nothing is submitting — D14, `toolautosubmit`. |
+| Returns fine but `pending` did not move | It answered without doing the work. |
+
+The last row is why the state check is part of the test and not an afterthought.

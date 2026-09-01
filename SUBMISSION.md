@@ -74,6 +74,21 @@ success reported as unrecoverable failure. The fix is a strict split — registr
 synchronous so an agent finds the tool it was told to poll, retractions deferred until
 after the call returns.
 
+**A declarative form tool is discoverable long before it is callable.** Ours listed
+correctly in `getTools()` with a clean input schema from the day the annotated `<form>`
+went in, and we recorded it as working on that basis. It was not. Calling it hung until
+the bridge timed out at 120 seconds and stored nothing. Three things are required and we
+had none: `toolautosubmit`, or the runtime just focuses the submit button and waits for a
+person who is not there; the React spelling `toolautosubmit=""`, because React drops an
+unknown attribute whose value is boolean `true`; and `SubmitEvent.respondWith()`, the
+only channel back to the agent. Then the envelope bug above bit a second time on the same
+path. Fixed and verified by calling it — it now returns a result *and* stages the
+passage.
+
+That is the lesson of this project in one bug: **appearing in `getTools()` is not
+evidence a tool works.** The only evidence is a call through the path the consumer uses
+that comes back right and leaves the right state behind.
+
 One more, in our own code: contradiction detection was inverted. Contradictory passages
 are *textually near-identical* — "streaming on Max, 92%" against "streaming on Netflix,
 79%" scores 0.93 cosine — so the near-duplicate check was swallowing every

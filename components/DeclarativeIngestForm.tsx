@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { ingestPassage } from '@/src/rag/ingest';
 import { summarizeConflicts } from '@/src/rag/screen';
+import { fail } from '@/src/webmcp/errors';
+import { recordActivity, toCallToolResult } from '@/src/webmcp/registry';
 import { Panel, Pill } from './ui';
 
 /**
@@ -27,28 +29,82 @@ import { Panel, Pill } from './ui';
 export default function DeclarativeIngestForm() {
   const [note, setNote] = useState<string | null>(null);
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+
+    // Capture both before the first await. `currentTarget` is nulled once the
+    // event finishes dispatching, and `respondWith` may only be called while it
+    // is still in flight.
+    const form = event.currentTarget;
+    const submit = event.nativeEvent as SubmitEvent;
+
+    const data = new FormData(form);
     const text = String(data.get('text') ?? '');
     const sourceUrl = String(data.get('source_url') ?? '');
     const title = String(data.get('title') ?? '');
 
-    if (text.trim().length < 50 || !sourceUrl.trim() || !title.trim()) {
-      setNote('Text (50+ characters), source URL and title are all required.');
-      return;
+    const work = (async () => {
+      if (text.trim().length < 50 || !sourceUrl.trim() || !title.trim()) {
+        throw new Error('Text (50+ characters), source URL and title are all required.');
+      }
+      const result = await ingestPassage({ text, sourceUrl, title });
+      return {
+        ok: true as const,
+        source_id: result.sourceId,
+        staged_chunk_ids: result.stagedChunkIds,
+        chunk_count: result.chunkCount,
+        conflict_summary: summarizeConflicts(result.conflicts),
+        requires_human_approval: true,
+        message: `Staged ${result.chunkCount} chunk(s) for human review. They are NOT searchable yet.`,
+      };
+    })();
+
+    /*
+     * The half of the declarative API that is easy to miss, because the tool
+     * shows up in getTools() without it and looks like it works.
+     *
+     * An agent's submission arrives here with `agentInvoked` set, and the only
+     * channel back to that agent is `respondWith`. Without this branch the call
+     * never resolves — measured: it hung until the bridge timed out at 120s and
+     * staged nothing. `toolautosubmit` on the form is the other half; without
+     * that attribute the runtime just focuses the submit button and waits for a
+     * person who is not there.
+     */
+    if (submit.agentInvoked) {
+      const name = form.getAttribute('toolname') ?? 'autorag_submit_passage_form';
+      recordActivity(name, 'called', { source_url: sourceUrl, title });
+      work.then(
+        (result) => recordActivity(name, 'returned', result),
+        (err: unknown) => recordActivity(name, 'failed', String(err)),
+      );
+
+      // D12 applies here too, and this is the path where it was missed a second
+      // time: a bare object handed to `respondWith` reaches the agent as an empty
+      // response, exactly as it did from `registerTool`. Same envelope, and
+      // validation failures come back as a structured error rather than a
+      // rejected promise the bridge would render as an opaque throw.
+      submit.respondWith?.(
+        work.then(toCallToolResult, (err: unknown) =>
+          toCallToolResult(
+            fail(
+              'INVALID_INPUT',
+              err instanceof Error ? err.message : String(err),
+              undefined,
+              'autorag_ingest_passage',
+            ),
+          ),
+        ),
+      );
     }
 
     setNote('Chunking and embedding…');
-    try {
-      const result = await ingestPassage({ text, sourceUrl, title });
-      setNote(
-        `Staged ${result.chunkCount} chunk(s) for review. ${summarizeConflicts(result.conflicts)}`,
-      );
-      event.currentTarget.reset();
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : String(err));
-    }
+    work.then(
+      (result) => {
+        setNote(`Staged ${result.chunk_count} chunk(s) for review. ${result.conflict_summary}`);
+        form.reset();
+      },
+      (err: unknown) => setNote(err instanceof Error ? err.message : String(err)),
+    );
   }
 
   const field: React.CSSProperties = {
@@ -72,6 +128,7 @@ export default function DeclarativeIngestForm() {
       <form
         onSubmit={onSubmit}
         toolname="autorag_submit_passage_form"
+        toolautosubmit=""
         tooldescription="Submit a passage to Autorag's review queue using the page's own form. Equivalent to autorag_ingest_passage: the passage is chunked, embedded and staged for human approval, and does not become searchable until a person approves it."
         style={{ display: 'grid', gap: 9 }}
       >

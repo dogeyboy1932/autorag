@@ -159,45 +159,64 @@ are the product being judged.
 
 ## 6. Build sequence
 
-### Phase 0 — De-risk (do before committing a single design decision)
-- [ ] Register on Devpost
-- [ ] Chrome Canary + `chrome://flags/#enable-webmcp-testing`
-- [ ] Console: does `document.modelContext` exist? `navigator.modelContext`? **Write the answer into `lib/webmcp/API-DELTA.md`.**
-- [ ] Deploy a blank Next.js page to Vercel registering one trivial tool
-- [ ] Call it from ChatGPT's in-app browser. **Do not proceed until this round-trip works.**
-- [ ] Install the Model Context Tool Inspector extension
-- [ ] **Critical unknown:** does the agent retain your tools while on another tab? Determines whether the agent can harvest and deposit in one flow, or must return to your tab first. Test explicitly.
-- [ ] Confirm transformers.js model download works on Vercel (HF CDN reachable, COOP/COEP headers if WASM threads needed)
+### Phase 0 — De-risk — **COMPLETE, with two items deliberately dropped**
+- [x] Register on Devpost
+- [x] ~~Chrome Canary + `chrome://flags/#enable-webmcp-testing`~~ — the flag exists but
+      the matching command-line switch does not work. Use
+      `google-chrome --enable-features=WebMCP`.
+- [x] Console: `document.modelContext` — answered in API-DELTA D1
+- [ ] ~~Deploy a blank Next.js page to Vercel~~ — **dropped.** Deploy is a Phase 5 task
+      and no longer de-risks anything; the whole app builds and runs as a static export.
+- [ ] ~~Call it from ChatGPT's in-app browser~~ — **out of scope by decision.** Chrome is
+      the tested surface; the docs claim nothing about other hosts (`HUMAN-TASKS.md` §1).
+- [x] ~~Model Context Tool Inspector~~ — superseded by the MCP bridge, see Phase 2
+- [x] **Critical unknown — resolved:** does not matter. AD-3 has the agent return to the
+      Autorag tab to deposit, so tool retention across tabs is not on the critical path.
+- [x] transformers.js model download works; COOP/COEP deliberately NOT set — they would
+      block the cross-origin HF CDN fetch. See `next.config.mjs`.
 
-### Phase 1 — RAG core, no WebMCP
-- [ ] Embedding pipeline + warmup indicator
-- [ ] Chunker with source metadata
-- [ ] IndexedDB store; survives reload
-- [ ] Cosine search
-- [ ] Crude UI to paste text and search it
-- [ ] **Gate:** paste → search → correct chunk returns
+### Phase 1 — RAG core, no WebMCP — **COMPLETE**
+- [x] Embedding pipeline + warmup indicator
+- [x] Chunker with source metadata
+- [x] IndexedDB store; survives reload
+- [x] Cosine search — *now hybrid dense+BM25, see README "Retrieval quality"*
+- [x] Crude UI to paste text and search it
+- [x] **Gate PASSED** (re-verified 2026-09-01): paste → search → correct chunk, and the
+      corpus survives a full reload. `pnpm bench` 21/21 top-1.
 
-### Phase 2 — Tool surface
-- [ ] `registry.ts` with feature detection + AbortController lifecycle
-- [ ] All ingestion + retrieval tools
-- [ ] Structured errors throughout
-- [ ] Verify every tool in the Tool Inspector
-- [ ] **Gate:** agent ingests and retrieves without you touching the UI
+### Phase 2 — Tool surface — **COMPLETE**
+- [x] `registry.ts` with feature detection + AbortController lifecycle
+- [x] All ingestion + retrieval tools — 14 imperative, 1 form-derived
+- [x] Structured errors throughout
+- [x] ~~Verify every tool in the Tool Inspector~~ — superseded: every tool is verified
+      through the **MCP bridge** instead, which is the path agents actually use. The
+      extension would not have caught D12 or D14.
+- [x] **Gate PASSED** (re-verified 2026-09-01): ingest ×4, adjudicate, reject, approve,
+      search — driven entirely through `call_webmcp_tool`, zero UI interaction.
 
-### Phase 3 — Curation layer (the differentiator)
-- [ ] `screen.ts` — dedup by similarity threshold, contradiction detection, staleness by date
-- [ ] Review queue UI with conflict badges
-- [ ] `requestUserInteraction` on approve/reject/forget
-- [ ] Dynamic register/unregister on queue state
-- [ ] Live activity log of agent calls
-- [ ] `autorag_explain_retrieval`
-- [ ] **Gate:** a bad source visibly gets caught and rejected
+### Phase 3 — Curation layer (the differentiator) — **COMPLETE**
+- [x] `screen.ts` — dedup by similarity threshold, contradiction detection, staleness by date
+- [x] Review queue UI with conflict badges
+- [x] ~~`requestUserInteraction` on approve/reject/forget~~ — **impossible.** The API does
+      not exist in any shipping runtime (API-DELTA D4). The human gate is in-page, which
+      is the better design: the person is visibly the gate, on screen.
+- [x] Dynamic register/unregister on queue state
+- [x] Live activity log of agent calls — *the form-derived tool was missing from it until
+      2026-09-01; fixed*
+- [x] `autorag_explain_retrieval`
+- [x] **Gate PASSED** (re-verified 2026-09-01): an undated blog claiming a free Netflix
+      stream was flagged against the dated JustWatch listing, adjudicated by the agent,
+      rejected with a reason, and on re-proposal the memory returned that reason.
+      *Known limit: it caught one of the two real disagreements in that post — see
+      `evals/RESULTS.md`.*
 
-### Phase 4 — Corpus management + polish
-- [ ] Source list, stats, mark stale, forget
-- [ ] Declarative form
-- [ ] Empty/loading/error states
-- [ ] Visual polish — this is your video
+### Phase 4 — Corpus management + polish — **COMPLETE**
+- [x] Source list, stats, mark stale, forget — all four exercised through the bridge,
+      including the destructive path with and without `confirm`
+- [x] Declarative form — *listed correctly from the start but did **not work** until
+      2026-09-01; three separate causes, see API-DELTA D14*
+- [x] Empty/loading/error states
+- [x] Visual polish — screenshot in the README
 
 ### Phase 5 — Submission (treat as a deliverable, not a wrap-up)
 - [x] README: architecture, tool table, setup, screenshot

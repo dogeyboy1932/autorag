@@ -59,6 +59,17 @@ function emit(entry: ActivityEntry) {
 }
 
 /**
+ * Records a tool call that did not come through `registerGroup`.
+ *
+ * The declarative `<form>` tool is the only one: the browser invokes it by
+ * submitting the form, so nothing here wraps its execute. Without this, three
+ * agent calls could land and the activity panel still read "No agent calls yet".
+ */
+export function recordActivity(tool: string, phase: ActivityEntry['phase'], detail?: unknown) {
+  emit({ at: new Date().toISOString(), tool, phase, detail });
+}
+
+/**
  * Registers a batch of tools under a group. Re-registering a group aborts the
  * previous one first, so React StrictMode's double-invoke and SPA navigation
  * cannot leave ghost tools behind.
@@ -157,11 +168,14 @@ export function normalizeInputSchema(schema: unknown): Record<string, unknown> |
  *   returns an MCP envelope    -> {"ok":true,...}
  *
  * So every tool result is wrapped here, centrally, rather than trusting fifteen
- * tool bodies to remember. `structuredContent` carries the payload as data for
+ * tool bodies to remember. Exported because the declarative `<form>` tool does not
+ * go through `registerGroup` — it answers the agent through
+ * `SubmitEvent.respondWith`, and needs the identical envelope. That path was
+ * initially missed for exactly the reason D12 describes. `structuredContent` carries the payload as data for
  * clients that read it; `content` carries the same thing as text for those that
  * do not.
  */
-function toCallToolResult(value: unknown) {
+export function toCallToolResult(value: unknown) {
   // Already an envelope (or an error the tool shaped itself): pass through.
   if (value && typeof value === 'object' && 'content' in (value as object)) {
     return value;
