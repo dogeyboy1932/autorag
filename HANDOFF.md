@@ -2,7 +2,7 @@
 
 **Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
 WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 10 commits, **nothing pushed yet.**
+**Last worked:** 2026-09-01. **Branch:** `main`, 11 commits, **nothing pushed yet.**
 
 ---
 
@@ -10,7 +10,7 @@ WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 10 commits, all local
+git log --oneline          # 11 commits, all local
 pnpm install               # if node_modules is missing
 pnpm dev                   # http://localhost:3111
 pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25
@@ -215,7 +215,7 @@ prove that except an agent that has never seen this code.
 
 ## 6. What is left
 
-**Blocked on the user** (see `HUMAN-TASKS.md`):
+**Blocked on the user** (`HUMAN-TASKS.md` is the full walkthrough to demo-ready):
 
 - [ ] Push the repo. `gh` is authed as `dogeyboy1932`. The command is
       `gh repo create autorag --public --source=. --remote=origin --push`.
@@ -275,7 +275,7 @@ until you restart `pnpm dev`.
 ```
 MANUAL.md          ← plain-language guide + test plan. Start here.
 HANDOFF.md         ← this file
-HUMAN-TASKS.md     ← what only the user can do
+HUMAN-TASKS.md     ← ordered walkthrough from here to demo-ready: run it, test it, use it
 SUBMISSION.md      ← Devpost draft, four required questions answered
 README.md          ← technical README for judges
 lib/webmcp/API-DELTA.md        ← 15 verified findings. Highest-value doc.

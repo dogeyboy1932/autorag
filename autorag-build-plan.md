@@ -167,8 +167,9 @@ are the product being judged.
 - [x] Console: `document.modelContext` — answered in API-DELTA D1
 - [ ] ~~Deploy a blank Next.js page to Vercel~~ — **dropped.** Deploy is a Phase 5 task
       and no longer de-risks anything; the whole app builds and runs as a static export.
-- [ ] ~~Call it from ChatGPT's in-app browser~~ — **out of scope by decision.** Chrome is
-      the tested surface; the docs claim nothing about other hosts (`HUMAN-TASKS.md` §1).
+- [ ] ~~Call it from ChatGPT's in-app browser~~ — **out of scope by decision.** Chrome 151
+      and Brave/Chromium 152 are the tested surfaces; the docs claim nothing about other
+      hosts.
 - [x] ~~Model Context Tool Inspector~~ — superseded by the MCP bridge, see Phase 2
 - [x] **Critical unknown — resolved:** does not matter. AD-3 has the agent return to the
       Autorag tab to deposit, so tool retention across tabs is not on the critical path.

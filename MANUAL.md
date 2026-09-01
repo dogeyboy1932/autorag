@@ -79,7 +79,9 @@ open the page.
 
 ## 3. Getting it running
 
-You need **Google Chrome version 149 or newer**. Check yours at `chrome://version`.
+You need a **Chromium browser, version 149 or newer**. Chrome and Brave both work —
+Brave 1.94 is Chromium 152 and has WebMCP natively. Check yours at `chrome://version`
+or `brave://version`.
 
 **Terminal 1 — start the app:**
 ```bash
@@ -88,11 +90,15 @@ pnpm dev
 ```
 It'll say `http://localhost:3111`.
 
-**Open Chrome with the agent feature switched on.** This matters — a normal Chrome
+**Open the browser with the agent feature switched on.** This matters — an ordinary
 window will show the page but agents won't see the tools:
 ```bash
 google-chrome --enable-features=WebMCP http://localhost:3111
+brave --enable-features=WebMCP http://localhost:3111
 ```
+
+> **Quit the browser completely first.** If a window is already open, this just opens a
+> tab in the running process and the flag is silently ignored.
 
 > **Careful:** there's a setting at `chrome://flags/#enable-webmcp-testing` that *looks*
 > like the right one. Turning it on works. But the command-line version
@@ -107,7 +113,7 @@ after that, so later loads are instant.
 | Badge | Meaning |
 |---|---|
 | 🟢 `15 tools on document.modelContext` | Agents can see your tools. Working. |
-| 🔴 `no WebMCP surface` | You forgot `--enable-features=WebMCP`, or Chrome is too old. |
+| 🔴 `no WebMCP surface` | You forgot `--enable-features=WebMCP`, a window was already open so the flag was ignored, or the browser is too old. |
 | 🟢 `model ready · wasm` | Ready to go. (`wasm` or `webgpu` — both fine, webgpu is faster.) |
 | 🟠 `downloading embedding model · 40%` | Still loading. Wait. |
 
@@ -182,8 +188,8 @@ Then, with the dev server running, ask your coding agent:
 > Using the chrome-devtools MCP server, open http://localhost:3111 and list the WebMCP
 > tools that page offers.
 
-You should get about 4 tools starting with `autorag_`. (Only 4 at first — more appear as
-the memory fills. That's deliberate, see §7.)
+You should get 5 tools starting with `autorag_`. (Only 5 at first — 9 once something is
+staged, 15 once something is approved. That's deliberate, see §7.)
 
 ### The five agent tests
 
@@ -233,14 +239,16 @@ Open a **fresh** agent session with no context and ask something vague:
 bug, not an agent bug.** The description needs to be clearer.
 
 **This test has never been run.** Everything verified so far either drives the tools by
-name from a script, or is driven by someone who wrote the descriptions and therefore
-already knows what they mean. Nobody has handed the tools to an agent that has never
-seen this project. Until that happens, treat "the tool descriptions are good" as an
-untested claim — and it is the specific claim this project is judged on.
+name from a script, or is driven by someone who already knows what the descriptions
+mean. Nobody has handed the tools to an agent that has never seen this project. Until
+that happens, treat "the tool descriptions are good" as an untested claim — and it is
+the specific claim this project is judged on. `HUMAN-TASKS.md` step 5 is the procedure.
 
-The same applies to `evals/autorag_eval.xml`. Its expected answers are now *measured*
-rather than guessed, which is an improvement, but the questions have never been given to
-an agent. It is a correct answer key for an exam nobody has sat.
+The eleven questions in `evals/autorag_eval.xml` **have** now been run end-to-end
+through the MCP bridge and score 11/11, and five defects in the tool contract were found
+and fixed along the way — see `evals/RESULTS.md`. But that run was driven by a caller
+who knew the repo. It proves the arguments are guessable from the schemas and that the
+results answer the questions. It cannot prove the *choice* of tool.
 
 ---
 
@@ -315,7 +323,7 @@ the context.
 
 | What you see | Why |
 |---|---|
-| Only 4 tools at first, more later | Deliberate. Approval tools appear when something's waiting; search tools appear once something's approved. An agent is never offered a search tool for an empty memory. |
+| Only 5 tools at first, more later | Deliberate. Approval tools appear when something's waiting; search tools appear once something's approved. An agent is never offered a search tool for an empty memory. |
 | First load takes ~60 seconds | The 25MB model. Once only — later loads are instant. |
 | Searching returns nothing after marking something stale | Stale sources are hidden by default. The result tells the agent to retry with `include_stale`. |
 | A one-word search scores 0.2 and still finds the right thing | Normal. Short queries always score low. Trust the **confidence** label, not the number. |
@@ -328,10 +336,10 @@ the context.
 
 | Symptom | Fix |
 |---|---|
-| 🔴 `no WebMCP surface` | Relaunch with `--enable-features=WebMCP`. Chrome must be 149+. |
-| Badge stuck orange | No internet, or the model CDN is blocked. Needs one-time access to huggingface.co. |
+| 🔴 `no WebMCP surface` | Quit the browser completely, then relaunch with `--enable-features=WebMCP`. Must be Chromium 149+. |
+| Badge stuck orange | No internet, or the model CDN is blocked — **Brave Shields does this**. Needs one-time access to huggingface.co. |
 | `embeddings unavailable` | Neither WebGPU nor WASM started. Check the browser console. |
-| Agent can't see tools | Wrong Chrome window, or the tab is closed. The tab must be open — tools live on the page. |
+| Agent can't see tools | Wrong browser window, or the tab is closed. The tab must be open — tools live on the page. |
 | Everything vanished | Incognito, cleared site data, or a different Chrome profile. Storage is per-profile. |
 | Agent gets `UnknownError` | Should be fixed — see `lib/webmcp/API-DELTA.md` D11. If it recurs, that's a real regression. |
 
@@ -345,7 +353,7 @@ the context.
 | Understand the tools | `lib/tool-design/TOOL-CONTRACT.md` |
 | Know what the browser actually does | `lib/webmcp/API-DELTA.md` — verified by running it, not by reading docs |
 | Record the demo video | `lib/demo/DEMO-SCRIPT.md` |
-| Know what only I can do | `HUMAN-TASKS.md` |
+| Get from here to demo-ready, in order | `HUMAN-TASKS.md` |
 | Submit to Devpost | `SUBMISSION.md` |
 | Change how text is split | `src/rag/chunk.ts`, notes in `lib/rag/chunking-notes.md` |
 | Change conflict sensitivity | `src/rag/screen.ts` — the thresholds at the top |
@@ -357,10 +365,13 @@ the context.
 
 Before pointing a camera at it:
 
-- [ ] Chrome launched with `--enable-features=WebMCP`
+- [ ] Browser fully quit, then launched with `--enable-features=WebMCP`
+- [ ] `pnpm dev` restarted since the last `next.config.mjs` change, so the floating dev
+      chip is actually gone
 - [ ] Badge green: **model ready**
 - [ ] Badge green: **N tools on document.modelContext**
 - [ ] `pnpm bench` passes
+- [ ] `pnpm loop` passes 15/15
 - [ ] Memory is **empty** (the demo starts from nothing — wrong answer first, right
       answer after)
 - [ ] Fallback passages ready in a second tab in case a live page has changed
