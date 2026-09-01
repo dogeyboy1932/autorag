@@ -112,19 +112,34 @@ Two changes fixed it:
   contains the runtime. Confidence keys on how much of the query's vocabulary the
   passage actually covers, falling back to the dense score for paraphrase.
 
-```
-                    top-1     usable verdict
-dense only          85%       —
-hybrid + calibrated 100%      100%
-```
-
 Run it yourself with `pnpm bench` against a running dev server.
 
-**What it still declines to answer, correctly.** "how long is it" scores 0.139 with the
-word "long" absent from the corpus — identical to "how do I bake sourdough", which
-scores 0.139 with a *larger* margin. The two are indistinguishable at the signal level,
-so both report low confidence. Ranking a plausible source first there would be
-coincidence at the noise floor, and reporting it as knowledge would be a lie.
+### Signals, not verdicts
+
+Autorag has no language model and cannot see the caller's conversation, so it does not
+decide whether a question is answerable — that is the agent's job (AD-1). It reports
+what it found and how well it matched, and always returns passages.
+
+The distinction matters most on follow-ups. "how long is it" and "how do I bake
+sourdough" both score ≈0.08 and are indistinguishable by score alone. But they are not
+the same situation, and the agent is told so:
+
+| Query | What Autorag reports |
+|---|---|
+| `how long is it` | *"This query refers to something it does not name, which only you can resolve — so the score reflects wording, not whether the answer is here. Judge these passages on their content."* |
+| `how do I bake sourdough` | *"No passage contains "bake", "sourdough" — the match rests on meaning rather than wording."* |
+
+The first is answerable and the passages contain the runtime; only the agent knows what
+"it" refers to. The second genuinely is not covered. An earlier version emitted *"say so
+rather than inferring an answer"* for both — the retrieval layer instructing the
+generation layer on the basis of information it does not have.
+
+```
+top-1 21/21    no overclaim 3/3    no withhold 25/25
+```
+
+`no withhold` is the load-bearing one: passages come back on every query, so the agent
+always has something to judge rather than being told to give up.
 
 ## Curation
 

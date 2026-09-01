@@ -87,13 +87,26 @@ figures, the agent rules on it, a human rejects it with a reason — and when th
 material is proposed again, the memory hands back the human's own words explaining why
 it was turned down. That is memory with judgment in it, not just storage.
 
+One more, late and worth the rework: the retrieval layer was quietly making the
+generation layer's decisions. When a question matched weakly, `coverage_note` returned
+"say so rather than inferring an answer from these passages" — a retrieval tool
+instructing an LLM to decline, based on information it does not have. A follow-up like
+"how long is it" scores near zero because it shares no words with its answer, but the
+passages contain the runtime and the agent knows what "it" refers to. Autorag never can.
+Now it reports signals — match strength, which query terms are absent, whether the query
+leans on an unresolved reference — and always returns the passages. The agent judges.
+
 ## What we learned
 
-Screening should nominate, never rule. Embedding distance can establish that two
-passages are about the same subject; it cannot establish that they disagree. Pretending
-otherwise would have been an overclaim, so the heuristic shortlists and the agent
-adjudicates and the human decides — three steps, each doing only what it is actually
-capable of.
+Every layer should do only what it is actually capable of, and say so.
+
+Screening nominates, it never rules: embedding distance can establish that two passages
+are about the same subject, never that they disagree — so the heuristic shortlists, the
+agent adjudicates, the human decides. Retrieval reports, it never instructs: it can
+measure how well a passage matches some words, never whether a question is answerable —
+so it hands over passages and signals, and the agent decides. Both are the same lesson
+learned twice, and in both cases the honest version turned out to be the more useful
+one.
 
 ## What's next
 

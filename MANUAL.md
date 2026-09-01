@@ -246,18 +246,35 @@ pnpm bench        # terminal 2
 Currently: **top-1 100%, usable verdict 100%.** Exits non-zero if anything regresses, so
 you can run it after any change.
 
-### A note on what it refuses to answer
+### Why low confidence does not mean "no answer"
 
-Type `how long is it` into search. It finds the right passage but says **low confidence
-/ not covered**, which looks wrong. It isn't.
+Type `how long is it` into search. It finds the right passage, but the confidence says
+**low**. That looks broken. It isn't — and the reason explains the whole design.
 
-That query has no subject ("it" — what?) and the word "long" appears nowhere in the
-corpus. Its match strength is `0.139` — *exactly the same* as `how do I bake sourdough`,
-which is pure nonsense. The system genuinely cannot tell those two apart, so it declines
-both. Getting the right answer there would be luck, and reporting luck as confidence is
-how a tool starts lying to you.
+Autorag has no AI in it. It cannot know that "it" means the film you were just
+discussing, because it cannot see your conversation. The agent can. So Autorag's job is
+to hand over the passages and say honestly what it does and doesn't know, and the
+**agent** decides whether that's an answer.
 
-**This is correct behaviour. Don't file it as a bug.**
+The score is only measuring *how much your wording overlaps the stored text*. For a
+follow-up question that overlap is near zero even when the answer is sitting right
+there. So the tool says so in as many words:
+
+> "This query refers to something it does not name, which only you can resolve — so the
+> score reflects wording, not whether the answer is here. Judge these passages on their
+> content."
+
+Compare a genuinely unanswerable question, `how do I bake sourdough`, which scores the
+same but gets a different message:
+
+> "No passage contains 'bake', 'sourdough' — the match rests on meaning rather than
+> wording."
+
+Same number, two different situations, and the agent is told which is which.
+
+**Passages are returned either way.** Autorag never withholds them and never tells the
+agent to give up — that would be a retrieval tool overruling the thing that actually has
+the context.
 
 ---
 

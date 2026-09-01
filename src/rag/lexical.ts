@@ -211,3 +211,33 @@ export function termCoverage(query: string, docId: string, docs: LexDoc[]): numb
   }
   return found / raw.length;
 }
+
+/**
+ * Third-person pronouns. Deliberately excludes "I" and "you": those refer to the
+ * participants, not to something the memory is expected to resolve.
+ */
+const DEICTIC = new Set([
+  'it', 'its', 'they', 'them', 'their', 'theirs', 'this', 'that', 'these', 'those',
+  'he', 'him', 'his', 'she', 'her', 'hers',
+]);
+
+/**
+ * Whether a query stands on its own, or leans on something said earlier.
+ *
+ * "how long is it" has a content term ("long") yet is not self-contained: the
+ * subject lives in the caller's conversation, which Autorag cannot see. Saying so
+ * explicitly is more useful to an agent than any score, because the agent *can*
+ * resolve the reference and should weigh the passages on their content instead
+ * of on a similarity number that means nothing here.
+ *
+ * "how do I bake sourdough" is self-contained but off-topic — a different
+ * situation entirely, and one the agent should handle differently.
+ */
+export function isSelfContained(query: string): boolean {
+  const tokens = tokenize(query);
+  if (tokens.length === 0) return false;
+  const hasReference = tokens.some((t) => DEICTIC.has(t));
+  const substantive = contentTerms(query).filter((t) => !DEICTIC.has(t));
+  // A dangling reference is only a problem when nothing else identifies the subject.
+  return !hasReference || substantive.length >= 2;
+}

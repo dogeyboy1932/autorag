@@ -9,6 +9,7 @@
 
 import type { ModelContextTool } from '@mcp-b/webmcp-types';
 import { confidenceOf, coverageNote, search } from '@/src/rag/search';
+import { contentTerms, isSelfContained } from '@/src/rag/lexical';
 import { countByStatus } from '@/src/rag/store';
 import { fail, guard } from '../errors';
 import { page } from './shared';
@@ -105,7 +106,7 @@ export const searchTool = {
 export const answerWithSourcesTool = {
   name: 'autorag_answer_with_sources',
   description:
-    'Retrieve everything needed to answer a question from memory, with provenance. Returns supporting passages, the sources they came from with ingest dates, and a confidence signal. This tool does NOT write an answer — you do, from these passages, and you cite the sources. If confidence is low, say the memory does not cover the question instead of inferring an answer.',
+    'Retrieve everything needed to answer a question from memory, with provenance: supporting passages, the sources they came from with ingest dates, and match signals. This tool does NOT write the answer and does NOT decide whether your question is answerable — it has no language model and no access to your conversation. You have both. `confidence` describes how well the passages match the words you sent, not whether they contain the answer: a follow-up like "how long is it" scores low here while the passages answer it perfectly, because only you know what "it" refers to. Read the passages and judge.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -144,11 +145,24 @@ export const answerWithSourcesTool = {
           stale_reason: s.staleReason,
         })),
         confidence,
+        match_signals: {
+          top_score: Number((result.hits[0]?.score ?? 0).toFixed(4)),
+          query_terms: contentTerms(input.question.trim()),
+          unmatched_terms: result.unmatchedTerms,
+          /*
+           * False when the query leans on a reference only the caller can
+           * resolve ("how long is it"). The score is then close to meaningless
+           * and the passages should be judged on their content instead.
+           */
+          query_is_self_contained: isSelfContained(input.question.trim()),
+          passages_returned: result.hits.length,
+        },
         coverage_note: coverageNote(
           result.hits,
           result.totalCandidates,
           confidence,
           result.unmatchedTerms,
+          input.question.trim(),
         ),
       };
     }),
@@ -215,7 +229,7 @@ export const explainRetrievalTool = {
 export const checkCoverageTool = {
   name: 'autorag_check_coverage',
   description:
-    'Ask whether the memory can support an answer to a question, before committing to answering it. Returns a verdict, the best supporting passages, and the top score. Use it to decide between answering from memory and going to browse for more material. It reports what the corpus DOES cover for this question; it cannot enumerate what is missing.',
+    'Check how well the memory matches a question before committing to answer it, and get back the best supporting passages plus a verdict. The verdict measures overlap between your wording and the stored passages — it is not a ruling on whether the question is answerable, which only you can make with your conversation in view. Treat not_covered as "nothing here matches these words", and check the returned passages before concluding the memory is missing something. It reports what the corpus does cover; it cannot enumerate what is absent.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -246,6 +260,9 @@ export const checkCoverageTool = {
        * one-word question can be fully answered by a passage it scores 0.13
        * against, so counting passages above a fixed cutoff under-reports
        * coverage badly on exactly the queries people type most.
+       *
+       * Even so this is a lexical judgement, not a semantic one — hence the
+       * hedged wording in `recommendation` and the tool description.
        */
       const verdict =
         confidence === 'high'
@@ -272,10 +289,10 @@ export const checkCoverageTool = {
         candidates_considered: result.totalCandidates,
         recommendation:
           verdict === 'covered'
-            ? 'Answer from memory with autorag_answer_with_sources and cite the sources.'
+            ? 'Strong match. Answer from memory with autorag_answer_with_sources and cite the sources.'
             : verdict === 'partial'
-              ? 'Only one passage supports this. Answer cautiously and say the memory is thin here, or browse for a second source and ingest it.'
-              : 'The memory does not cover this. Browse for material and ingest it with autorag_ingest_passage rather than guessing.',
+              ? 'Partial match. Read the returned passages: they may still answer it, especially if your conversation supplies context this tool cannot see. Otherwise browse for another source and ingest it.'
+              : 'Nothing here matches this wording. If the question was a follow-up that depends on earlier conversation, retry with the subject spelled out before concluding the memory lacks it — then browse and ingest with autorag_ingest_passage.',
       };
     }),
 } satisfies Tool;

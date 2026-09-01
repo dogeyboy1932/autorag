@@ -19,9 +19,17 @@ export const SEED = [
 ];
 
 /**
- * `want` is the source id that should rank first.
- *  - `null`  — any source is defensible; ranking is not scored.
- *  - `NONE`  — the corpus cannot answer this; the app must say so.
+ * Each row is `[shape, query, want]`.
+ *
+ * `want` is the source id that should rank **first**:
+ *  - a source id — that source must lead
+ *  - `null`      — several answers are defensible; ranking not scored
+ *  - `NONE`      — the corpus genuinely contains nothing relevant
+ *
+ * Note what is *not* asserted anywhere here: that the app should refuse to
+ * answer. Autorag has no language model and cannot see the caller's
+ * conversation, so deciding a question is unanswerable is not its call to make
+ * (build plan AD-1). It returns passages and honest signals; the agent judges.
  */
 export const QUERIES = [
   ['single word',   'dune',                              null],
@@ -46,21 +54,18 @@ export const QUERIES = [
   ['full question', 'What did critics score it?',        'rt'],
 
   /*
-   * Must be reported as uncovered.
-   *
-   * "how long is it" is in this group deliberately, and it is the most
-   * instructive row in the file. It *feels* answerable — the corpus does contain
-   * the runtime. But the query has no subject, and the word "long" appears
-   * nowhere in the corpus, so its top dense score is 0.139 — identical to
-   * "how do I bake sourdough", which scores 0.139 with a *larger* margin.
-   *
-   * The two are indistinguishable at the signal level. Ranking Wikipedia first
-   * is coincidence at the noise floor, not knowledge, and reporting confidence
-   * from it would be exactly the overclaim this project avoids everywhere else.
-   * Low confidence is the correct answer here, not a bug to fix.
+   * Under-specified follow-ups. The corpus *does* answer these — but only if you
+   * know what "it" refers to, which Autorag never does and the calling agent
+   * always does. So the passage must still come back ranked first, the score
+   * will be low, and the note must say the query carries no terms of its own
+   * rather than telling the agent to give up.
    */
-  ['under-specified', 'how long is it',        'NONE'],
-  ['off-topic',       'capital of Mongolia',   'NONE'],
-  ['off-topic',       'how do I bake sourdough', 'NONE'],
+  ['under-specified', 'how long is it',            'wiki'],
+  ['under-specified', 'what did they score it',    'rt'],
+
+  /* Genuinely absent from the corpus. Passages still come back — the agent is
+   * never left empty-handed — but the match must not be reported as strong. */
+  ['off-topic',       'capital of Mongolia',       'NONE'],
+  ['off-topic',       'how do I bake sourdough',   'NONE'],
   ['off-topic',       'python list comprehension', 'NONE'],
 ];

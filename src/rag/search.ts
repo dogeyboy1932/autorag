@@ -9,7 +9,7 @@
 import type { Chunk, SearchHit, Source } from '@/src/types';
 import { allChunks, allSources } from './store';
 import { embedOne } from './embed';
-import { bm25, contentTerms, saturate, termCoverage, type LexDoc } from './lexical';
+import { bm25, contentTerms, isSelfContained, saturate, termCoverage, type LexDoc } from './lexical';
 
 /**
  * Multiplier applied to a chunk whose source is marked stale. Demote, don't
@@ -119,18 +119,18 @@ export async function search(query: string, options: SearchOptions = {}): Promis
 }
 
 /**
- * Confidence for `autorag_answer_with_sources`.
+ * How strongly the retrieved passages match the query *as literally written*.
  *
- * An absolute cosine cutoff was wrong, and measurably so. Similarity scales with
- * query length: "runtime" scored 0.127 against the passage that *literally
- * contains the runtime*, and "how long is it" scored 0.139. A 0.35 floor
- * therefore reported `low` — telling the agent to decline — on eight of
- * twenty-one correct retrievals.
+ * This is a **signal, not a verdict.** Autorag has no LLM (build plan AD-1) and
+ * cannot judge whether a question is answerable — only the calling agent can,
+ * because only the agent has the conversation. "how long is it" is ambiguous to
+ * this module and perfectly clear to an agent three turns into a discussion
+ * about a film. Reporting `low` here means "these passages do not lexically
+ * match what you sent me", never "give up".
  *
- * What actually distinguishes a good hit from a bad one at short query lengths
- * is whether the passage contains the words asked about. So confidence keys on
- * term coverage first, and falls back to the dense score for paraphrase queries
- * that share no vocabulary with their answer.
+ * An absolute cosine cutoff was wrong and measurably so: similarity scales with
+ * query length, so "runtime" scores 0.127 against the passage that literally
+ * contains the runtime. Term coverage is the better signal at short lengths.
  */
 export function confidenceOf(hits: SearchHit[], query = '', docs: LexDoc[] = []): 'high' | 'medium' | 'low' {
   if (hits.length === 0) return 'low';
@@ -156,32 +156,47 @@ export function confidenceOf(hits: SearchHit[], query = '', docs: LexDoc[] = [])
   return 'low';
 }
 
+/**
+ * Describes what was retrieved. **Reports facts; never issues instructions.**
+ *
+ * An earlier version of this said "the memory likely does not cover this — say so
+ * rather than inferring an answer". That was the retrieval layer telling the
+ * generation layer how to behave, on the basis of information it does not have.
+ * The agent knows what "it" refers to; this module does not. So state the
+ * signals and let the agent decide.
+ */
 export function coverageNote(
   hits: SearchHit[],
   totalCandidates: number,
   confidence: 'high' | 'medium' | 'low' = 'medium',
   unmatchedTerms: string[] = [],
+  query = '',
 ): string {
   if (totalCandidates === 0) {
-    return 'The corpus is empty or every source is filtered out. Nothing can be answered from memory yet.';
+    return 'Nothing is searchable: the memory is empty, or every source was excluded by the filters.';
   }
-  if (hits.length === 0) return 'No passage matched this question at all.';
+  if (hits.length === 0) return 'No passage scored against this query.';
 
   const parts: string[] = [];
-  if (confidence === 'low') {
+  const strength =
+    confidence === 'high' ? 'strong' : confidence === 'medium' ? 'moderate' : 'weak';
+  parts.push(`Lexical/semantic match to the query as written is ${strength}.`);
+
+  if (query && !isSelfContained(query)) {
     parts.push(
-      'Weak match. The memory likely does not cover this — say so rather than inferring an answer from these passages.',
+      'This query refers to something it does not name, which only you can resolve — so the score above reflects wording, not whether the answer is here. Judge these passages on their content.',
     );
-  } else {
-    parts.push('Supporting passages retrieved with provenance. Cite the sources listed.');
-  }
-  if (unmatchedTerms.length > 0) {
+  } else if (unmatchedTerms.length > 0) {
     parts.push(
-      `No passage mentions ${unmatchedTerms.map((t) => `"${t}"`).join(', ')}, so treat any claim about that as uncovered.`,
+      `No passage contains ${unmatchedTerms
+        .map((t) => `"${t}"`)
+        .join(', ')} — the match rests on meaning rather than wording.`,
     );
   }
+
   if (hits.some((h) => h.source.stale)) {
-    parts.push('At least one supporting source is marked stale and was demoted; mention its age when citing it.');
+    parts.push('A supporting source is marked stale and was demoted; note its age if you cite it.');
   }
+  parts.push('Provenance for each passage is in `sources`.');
   return parts.join(' ');
 }

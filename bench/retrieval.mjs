@@ -5,10 +5,14 @@
  *   pnpm dev                       # in one terminal
  *   node bench/retrieval.mjs       # in another
  *
- * Reports two numbers:
- *   top-1          did the right source rank first
- *   usable verdict did the app's own confidence match reality — the one that
- *                  matters, because it decides whether an agent answers or declines
+ * Reports three numbers, which together define "working" for a retrieval layer
+ * that is deliberately not allowed to make judgement calls:
+ *
+ *   top-1        did the right source rank first
+ *   no overclaim did it avoid reporting a strong match for something the corpus
+ *                genuinely lacks (false confidence is the dangerous failure)
+ *   no withhold  did it always hand back passages, so the agent can judge for
+ *                itself rather than being told to give up
  */
 
 import puppeteer from 'puppeteer-core';
@@ -59,32 +63,48 @@ const rows = await page.evaluate(async (qs) => {
   for (const [shape, q, want] of qs) {
     const a = await window.__call('autorag_answer_with_sources', { question: q, k: 4 });
     const c = await window.__call('autorag_check_coverage', { question: q });
-    out.push({ shape, q, want, top: a.passages?.[0]?.source_url, conf: a.confidence, verdict: c.verdict });
+    out.push({ shape, q, want,
+      top: a.passages?.[0]?.source_url,
+      conf: a.confidence,
+      verdict: c.verdict,
+      n: a.passages?.length ?? 0,
+      note: a.coverage_note ?? '',
+      selfContained: a.match_signals?.query_is_self_contained });
   }
   return out;
 }, QUERIES);
 await browser.close();
 
-let rank1 = 0, ranked = 0, verdictOk = 0, judged = 0;
+let rank1 = 0, ranked = 0, overclaim = 0, offTopic = 0, withheld = 0;
 const fails = [];
-console.log('\nshape'.padEnd(18), 'top1'.padEnd(11), 'conf'.padEnd(8), 'coverage'.padEnd(13), 'query');
-console.log('-'.repeat(92));
+console.log('\nshape'.padEnd(18), 'top1'.padEnd(11), 'conf'.padEnd(8), 'coverage'.padEnd(13), 'n', ' query');
+console.log('-'.repeat(96));
 for (const r of rows) {
   const got = idByUrl[r.top] ?? '-';
   const uncoverable = r.want === 'NONE';
-  if (r.want && !uncoverable) { ranked++; if (got === r.want) rank1++; }
 
-  const ok = uncoverable
-    ? r.conf === 'low' || r.verdict === 'not_covered'
-    : got === r.want && r.conf !== 'low';
-  if (r.want) { judged++; if (ok) verdictOk++; else fails.push(r.q); }
+  // A retrieval layer must never leave the agent with nothing to judge.
+  if (r.n === 0) { withheld++; fails.push(`${r.q} (withheld passages)`); }
 
-  const mark = !r.want ? ' ' : ok ? '✓' : '✗';
-  console.log(r.shape.padEnd(18), got.padEnd(11), String(r.conf).padEnd(8), String(r.verdict).padEnd(13), mark + ' ' + r.q);
+  let mark = ' ';
+  if (uncoverable) {
+    offTopic++;
+    const claimed = r.conf === 'high';
+    if (claimed) { overclaim++; fails.push(`${r.q} (claimed strong match)`); }
+    mark = claimed ? '✗' : '✓';
+  } else if (r.want) {
+    ranked++;
+    const hit = got === r.want;
+    if (hit) rank1++; else fails.push(`${r.q} (ranked ${got}, wanted ${r.want})`);
+    mark = hit ? '✓' : '✗';
+  }
+  console.log(r.shape.padEnd(18), got.padEnd(11), String(r.conf).padEnd(8),
+              String(r.verdict).padEnd(13), String(r.n).padEnd(2), mark + ' ' + r.q);
 }
-console.log('-'.repeat(92));
+console.log('-'.repeat(96));
 console.log(`top-1 ${rank1}/${ranked} (${(100 * rank1 / ranked).toFixed(0)}%)   ` +
-            `usable verdict ${verdictOk}/${judged} (${(100 * verdictOk / judged).toFixed(0)}%)`);
-if (fails.length) console.log('failed:', fails.map((f) => `"${f}"`).join(', '));
+            `no overclaim ${offTopic - overclaim}/${offTopic}   ` +
+            `no withhold ${rows.length - withheld}/${rows.length}`);
+if (fails.length) console.log('failed:', fails.join(' | '));
 if (errors.length) console.log('page errors:', errors.slice(0, 3));
 process.exit(fails.length === 0 && errors.length === 0 ? 0 : 1);

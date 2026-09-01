@@ -64,7 +64,7 @@ export default function SearchPanel() {
       {result && (
         <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
           <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-            {coverageNote(result.hits, result.totalCandidates, confidence ?? 'medium', result.unmatchedTerms)}
+            {coverageNote(result.hits, result.totalCandidates, confidence ?? 'medium', result.unmatchedTerms, asked)}
           </span>
           {result.hits.length === 0 ? (
             <Empty>No approved chunks matched. Approve something in the review queue first.</Empty>
