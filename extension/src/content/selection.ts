@@ -11,7 +11,15 @@
  *    This script is the only context that can talk to both.
  */
 
-import { PAGE_REQUEST, PAGE_RESPONSE, envelope, type Request } from '../protocol';
+import {
+  PAGE_REQUEST,
+  PAGE_RESPONSE,
+  PREVIEW_PAGE,
+  PREVIEW_SELECTION,
+  envelope,
+  type Preview,
+  type Request,
+} from '../protocol';
 
 /* ---------- 2. bridge: page tool calls -> service worker -> offscreen ---------- */
 
@@ -176,12 +184,32 @@ function readablePageText(): string {
   return (clone.textContent ?? '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Context menu and keyboard shortcuts all land here, sharing one code path. */
-chrome.runtime.onMessage.addListener((message) => {
+/**
+ * Context menu, keyboard shortcuts and the panel all land here.
+ *
+ * Capture and preview are split deliberately. The keystroke and the in-page Keep
+ * button commit immediately, because they act on a selection you made on purpose
+ * and a confirmation step would ruin the reflex. Whole-page capture goes through
+ * a preview instead: it can be thousands of words, and nobody should hand that to
+ * a memory sight-unseen.
+ */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'autorag:capture-selection') {
     void keep(window.getSelection()?.toString() ?? '', 'your selection');
+    return;
   }
   if (message?.type === 'autorag:capture-page') {
     void keep(readablePageText(), 'this page');
+    return;
+  }
+  if (message?.type === PREVIEW_PAGE || message?.type === PREVIEW_SELECTION) {
+    const text =
+      message.type === PREVIEW_PAGE ? readablePageText() : (window.getSelection()?.toString() ?? '');
+    sendResponse({
+      text: text.trim(),
+      title: document.title || location.hostname,
+      url: location.href,
+    } satisfies Preview);
+    return true;
   }
 });

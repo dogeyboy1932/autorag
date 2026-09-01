@@ -204,6 +204,7 @@ try {
   );
   log('clicking Keep on a highlight stores it', clicked.startsWith('Kept'), `button read "${clicked}"`);
 
+
   // Approve it the way the person would, so recall has something to find.
   const approved = await page.evaluate(async () => {
     const send = (req) =>
@@ -234,6 +235,74 @@ try {
     'the memory is reachable from an unrelated site',
     recalled?.ok === true && Array.isArray(recalled.hits),
     `call succeeded from iana.org; ${recalled?.hits?.length ?? 0} passages (nothing approved yet, so 0 is correct)`,
+  );
+  /*
+   * The panel's own checks must run in the panel, not in a web page: `chrome.*`
+   * does not exist in a page's MAIN world, only in extension contexts and
+   * content scripts. Opening sidepanel.html as an ordinary tab gives the real
+   * thing an origin puppeteer can drive.
+   */
+  const swTarget = browser.targets().find((t) => t.url().includes('/background.js'));
+  const extId = swTarget ? new URL(swTarget.url()).host : null;
+  const panel = await browser.newPage();
+  await panel.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const read = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'p', request: req }, res),
+      );
+    return { stats: await send({ kind: 'stats' }), activity: await send({ kind: 'activity' }) };
+  });
+
+  log(
+    'the panel can report model state',
+    read.stats?.ok === true && read.stats.data.model_ready === true,
+    `phase=${read.stats?.data?.model_phase} ready=${read.stats?.data?.model_ready}`,
+  );
+
+  const feed = read.activity?.data ?? [];
+  log(
+    'background work is visible as an activity feed',
+    Array.isArray(feed) && feed.length > 0,
+    feed.length ? `${feed.length} events, latest: "${feed[0].message}"` : 'no events',
+  );
+
+  // Preview and WebMCP status both target "the tab you are looking at". Addressed
+  // here by explicit id, since the panel is itself the active tab under puppeteer.
+  const pageTargetId = await page.evaluate(() => document.title);
+  void pageTargetId;
+  const probe = await panel.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://example.com/*' });
+    const id = tabs[0]?.id;
+    if (!id) return { error: 'example.com tab not found' };
+    const preview = await chrome.tabs.sendMessage(id, { type: 'autorag:preview-page' });
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: id },
+      world: 'MAIN',
+      func: async () => {
+        const ctx = document.modelContext;
+        if (!ctx?.getTools) return { present: false, tools: [] };
+        return { present: true, tools: (await ctx.getTools()).map((t) => t.name) };
+      },
+    });
+    return { preview, webmcp: result };
+  });
+
+  log(
+    'whole-page capture can be previewed before it is stored',
+    typeof probe.preview?.text === 'string' && probe.preview.text.length > 0,
+    probe.preview
+      ? `${probe.preview.text.split(/\s+/).length} words previewed, nothing stored yet`
+      : `no preview (${probe.error ?? 'unknown'})`,
+  );
+
+  log(
+    'the panel can prove WebMCP is live on the tab',
+    probe.webmcp?.present === true &&
+      probe.webmcp.tools.filter((t) => t.startsWith('autorag_')).length === 4,
+    `${probe.webmcp?.tools?.filter((t) => t.startsWith('autorag_')).length ?? 0} autorag tools readable from the page`,
   );
 } catch (err) {
   log('run completed', false, String(err));

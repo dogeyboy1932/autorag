@@ -26,7 +26,8 @@ export type Request =
   | { kind: 'listSources' }
   | { kind: 'approve'; chunkIds: string[] }
   | { kind: 'reject'; chunkIds: string[]; reason: string }
-  | { kind: 'warmup' };
+  | { kind: 'warmup' }
+  | { kind: 'activity' };
 
 export type Response<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -50,5 +51,19 @@ export function isEnvelope(value: unknown): value is Envelope {
 export const PAGE_REQUEST = 'autorag:page-request';
 export const PAGE_RESPONSE = 'autorag:page-response';
 
-/** Isolated world → side panel, when the user selects and saves text. */
-export const CAPTURE = 'autorag:capture';
+/** Panel → content script: what *would* be captured, without capturing it. */
+export const PREVIEW_PAGE = 'autorag:preview-page';
+export const PREVIEW_SELECTION = 'autorag:preview-selection';
+
+export interface Preview {
+  text: string;
+  title: string;
+  url: string;
+}
+
+/** One line in the panel's activity feed. */
+export interface Event {
+  at: number;
+  phase: 'working' | 'done' | 'failed';
+  message: string;
+}

@@ -15,7 +15,22 @@ import { search, confidenceOf, coverageNote } from '@/src/rag/search';
 import { allChunks, allSources, countByStatus, decideChunks } from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
-import { isEnvelope, type Request, type Response } from '../protocol';
+import { isEnvelope, type Event, type Request, type Response } from '../protocol';
+
+/*
+ * A ring buffer of what this document has been doing.
+ *
+ * Chunking, embedding and screening all happen here, out of sight of every other
+ * context — so from the panel a capture is a spinner and then, eventually, a card.
+ * These lines are the only way to see that the work is progressing rather than
+ * wedged, which matters most during the one-time model download.
+ */
+const events: Event[] = [];
+function record(phase: Event['phase'], message: string) {
+  events.unshift({ at: Date.now(), phase, message });
+  events.length = Math.min(events.length, 50);
+}
+record('done', 'Autorag started');
 
 /*
  * Point the ONNX runtime at the copy vendored next to this bundle.
@@ -31,7 +46,19 @@ if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = chrome.runtime.ge
 
 // Start the model as soon as the document exists, rather than on first use, so
 // the first capture does not eat the download.
-void warmup();
+record('working', 'Loading the embedding model (25MB, once)');
+void warmup().then(
+  () => record('done', `Embedding model ready · ${warmupState().backend ?? 'cpu'}`),
+  (err: unknown) => record('failed', `Model failed: ${err instanceof Error ? err.message : String(err)}`),
+);
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'this page';
+  }
+}
 
 async function handle(request: Request): Promise<unknown> {
   switch (request.kind) {
@@ -40,13 +67,25 @@ async function handle(request: Request): Promise<unknown> {
       return { ...s, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIM, ready: isReady() };
     }
 
+    case 'activity':
+      return events;
+
     case 'ingest': {
+      const words = request.text.trim().split(/\s+/).length;
+      record('working', `Reading ${words} words from ${hostOf(request.sourceUrl)}`);
       const result = await ingestPassage({
         text: request.text,
         sourceUrl: request.sourceUrl,
         title: request.title,
         tags: request.tags,
       });
+      const n = result.conflicts.length;
+      record(
+        'done',
+        `Staged ${result.chunkCount} passage${result.chunkCount > 1 ? 's' : ''} from ${hostOf(
+          request.sourceUrl,
+        )}${n ? ` · ${n} conflict${n > 1 ? 's' : ''} to review` : ''}`,
+      );
       return {
         source_id: result.sourceId,
         staged_chunk_ids: result.stagedChunkIds,
@@ -71,7 +110,9 @@ async function handle(request: Request): Promise<unknown> {
     }
 
     case 'answer': {
+      record('working', `Searching for "${request.question.slice(0, 40)}"`);
       const r = await search(request.question, { k: 5 });
+      record('done', `Found ${r.hits.length} passage${r.hits.length === 1 ? '' : 's'}`);
       const confidence = confidenceOf(r.hits, request.question, r.docs);
       return {
         question: request.question,
@@ -139,11 +180,17 @@ async function handle(request: Request): Promise<unknown> {
       }));
     }
 
-    case 'approve':
-      return { approved: await decideChunks(request.chunkIds, 'approved') };
+    case 'approve': {
+      const ids = await decideChunks(request.chunkIds, 'approved');
+      record('done', `Kept ${ids.length} passage${ids.length > 1 ? 's' : ''} — now searchable`);
+      return { approved: ids };
+    }
 
-    case 'reject':
-      return { rejected: await decideChunks(request.chunkIds, 'rejected', request.reason) };
+    case 'reject': {
+      const ids = await decideChunks(request.chunkIds, 'rejected', request.reason);
+      record('done', `Discarded ${ids.length}, and remembered why`);
+      return { rejected: ids };
+    }
   }
 }
 
