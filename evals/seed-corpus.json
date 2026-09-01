@@ -1,0 +1,30 @@
+{
+  "_comment": "Fixed seed corpus for evals/autorag_eval.xml. Ingest all four, approve all, then mark justwatch stale with the reason below. Text is condensed from real pages; replace source_url values with live URLs before recording the demo.",
+  "sources": [
+    {
+      "source_url": "https://en.wikipedia.org/wiki/Dune:_Part_Two",
+      "title": "Dune: Part Two - Wikipedia",
+      "tags": ["film", "reference"],
+      "text": "Dune: Part Two is a 2024 epic science fiction film directed by Denis Villeneuve, who co-wrote the screenplay with Jon Spaihts. The sequel to Dune (2021), it adapts the second half of the 1965 novel Dune by Frank Herbert. The film stars Timothee Chalamet as Paul Atreides and Zendaya as Chani. It has a runtime of 166 minutes and was distributed by Warner Bros. Pictures. Principal photography took place in Hungary, Italy, Jordan and Abu Dhabi."
+    },
+    {
+      "source_url": "https://www.justwatch.com/us/movie/dune-part-two",
+      "title": "Dune: Part Two - streaming availability (JustWatch)",
+      "tags": ["film", "streaming"],
+      "text": "Dune: Part Two is currently available to stream on Max in the United States. It is also available to rent or buy from Amazon Video, Apple TV and Fandango at Home. Availability last verified August 2026. Streaming rights for Warner Bros. theatrical releases typically move between services as distribution deals are renegotiated.",
+      "mark_stale_reason": "Streaming availability changes monthly and needs re-verification."
+    },
+    {
+      "source_url": "https://www.rottentomatoes.com/m/dune_part_two",
+      "title": "Dune: Part Two - Rotten Tomatoes",
+      "tags": ["film", "reviews"],
+      "text": "Dune: Part Two holds a 92 percent critical aggregate score based on over 500 reviews. The critics consensus praises the visual scale and the performances. The audience score sits at 95 percent. The film runs 166 minutes and is rated PG-13 for sequences of strong violence and some suggestive material."
+    },
+    {
+      "source_url": "https://aggregator.example/dune-part-two-scores",
+      "title": "Dune: Part Two - aggregate scores (secondary aggregator)",
+      "tags": ["film", "reviews"],
+      "text": "Dune: Part Two holds a 79 percent critical aggregate score across sampled outlets. The film runs 166 minutes and was directed by Denis Villeneuve. Our sample weights trade publications more heavily than general-interest outlets, which accounts for divergence from other aggregators."
+    }
+  ]
+}

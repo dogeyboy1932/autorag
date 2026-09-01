@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>native tool</title>
+<body><pre id="out">…</pre><script>
+(async () => {
+  const ctx = document.modelContext;
+  const res = { hasCtx: !!ctx };
+  if (!ctx) { window.__r = res; document.getElementById('out').textContent='no ctx'; return; }
+  const ctrl = new AbortController();
+  await ctx.registerTool({
+    name: 'native_probe',
+    description: 'Echoes text. Diagnostic only.',
+    inputSchema: { type:'object', properties:{ text:{ type:'string', description:'echoed back' } }, required:['text'] },
+    annotations: { readOnlyHint: true },
+    execute: (...args) => {
+      res.executeArgCount = args.length;
+      res.argTypes = args.map(a => a === undefined ? 'undefined' : typeof a);
+      const second = args[1];
+      res.secondArgKeys = (second && typeof second === 'object') ? Object.keys(second) : [];
+      res.hasRequestUserInteraction = !!second && typeof second === 'object' && 'requestUserInteraction' in second;
+      res.secondArgIsAbortSignalHolder = !!second && typeof second === 'object' && 'signal' in second;
+      return { ok: true, echo: args[0] && args[0].text };
+    },
+  }, { signal: ctrl.signal });
+
+  const tools = await ctx.getTools();
+  const t = tools.find(x => x.name === 'native_probe');
+  res.toolCount = tools.length;
+  res.titleValue = JSON.stringify(t && t.title);
+  res.inputSchemaType = t ? typeof t.inputSchema : 'n/a';
+  res.hasAnnotationsMember = t ? ('annotations' in t) : false;
+  res.annotations = t ? (t.annotations ?? null) : null;
+
+  try { res.executeRaw = String(await ctx.executeTool(t, JSON.stringify({ text: 'hi' }))).slice(0,200); }
+  catch (e) { res.executeErr = String(e).slice(0,200); }
+
+  // Does abort actually remove it?
+  ctrl.abort();
+  res.toolCountAfterAbort = (await ctx.getTools()).length;
+
+  window.__r = res;
+  document.getElementById('out').textContent = JSON.stringify(res, null, 2);
+})();
+</script></body>

@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>native check</title>
+<body><pre id="out">…</pre><script>
+const r = {
+  documentModelContext: typeof document.modelContext,
+  navigatorModelContext: typeof navigator.modelContext,
+  modelContextTesting: typeof navigator.modelContextTesting,
+  registerTool: document.modelContext ? typeof document.modelContext.registerTool : 'n/a',
+  getTools: document.modelContext ? typeof document.modelContext.getTools : 'n/a',
+  executeTool: document.modelContext ? typeof document.modelContext.executeTool : 'n/a',
+};
+document.getElementById('out').textContent = JSON.stringify(r, null, 2);
+window.__nativeCheck = r;
+</script></body>

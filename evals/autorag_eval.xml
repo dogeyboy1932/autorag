@@ -1,0 +1,64 @@
+<!--
+  Autorag tool-surface evaluation.
+
+  Adapted from mcp-builder Phase 4, per autorag-build-plan.md §8. Each question is
+  independent, read-only, needs more than one tool call to answer, and is verifiable
+  by string comparison against a fixed seed corpus.
+
+  These evaluate the TOOL SURFACE, not the model: every answer is determined by what
+  the tools return. A failure means a schema or description is unclear, which is
+  exactly the thing this submission is judged on (amendments.md A5.2).
+
+  Seed the corpus from evals/seed-corpus.json before running.
+-->
+<evaluation>
+  <qa_pair>
+    <question>How many sources are currently in the Autorag memory, and how many of them are marked stale?</question>
+    <answer>4 sources, 1 marked stale</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Which embedding model does Autorag use, and how many dimensions do its vectors have?</question>
+    <answer>Xenova/all-MiniLM-L6-v2, 384 dimensions</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>According to the memory, what is the runtime of Dune: Part Two in minutes?</question>
+    <answer>166</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Two sources in the memory disagree about the critical aggregate score for Dune: Part Two. What are the two figures?</question>
+    <answer>92 and 79</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Ask Autorag whether it can answer "what is the capital of Mongolia". What coverage verdict does it return?</question>
+    <answer>not_covered</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Which source in the memory is marked stale, and what reason was recorded for it?</question>
+    <answer>The JustWatch availability listing, because streaming availability changes monthly and needs re-verification</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Attempt to forget the source titled "Arrival - production notes" without confirming. What error code comes back?</question>
+    <answer>INVALID_INPUT</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Search the memory for "Denis Villeneuve" and report which source ranks first and what its score is rounded to two decimal places.</question>
+    <answer>Dune: Part Two - Wikipedia, 0.62</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Using autorag_explain_retrieval for the query "streaming availability", how many candidates were considered and was any staleness demotion applied?</question>
+    <answer>5 candidates considered, staleness demotion applied to the JustWatch source</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>Call autorag_search with an empty corpus filter that matches nothing, using the tag "nonexistent". What does the tool tell you to try next?</question>
+    <answer>Retry with include_stale true before concluding the memory lacks this</answer>
+  </qa_pair>
+</evaluation>
