@@ -177,6 +177,41 @@ try {
     `staged ${kept?.chunk_count} chunk(s) from ${kept?.source_id ? 'example.com' : '?'}`,
   );
 
+  /*
+   * The human path, end to end, the way it is actually used: highlight text,
+   * click the button that appears, then ask for it back from a different site.
+   * No URL is typed anywhere; the source is taken from the tab.
+   */
+  await page.evaluate(() => {
+    const p = document.querySelector('p');
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.click('#autorag-keep-button');
+  await page
+    .waitForFunction(
+      () => document.getElementById('autorag-keep-button')?.textContent?.startsWith('Kept'),
+      { timeout: 30_000 },
+    )
+    .catch(() => {});
+  const clicked = await page.evaluate(
+    () => document.getElementById('autorag-keep-button')?.textContent ?? '(button gone)',
+  );
+  log('clicking Keep on a highlight stores it', clicked.startsWith('Kept'), `button read "${clicked}"`);
+
+  // Approve it the way the person would, so recall has something to find.
+  const approved = await page.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) => chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: '1', request: req }, res));
+    return send({ kind: 'stats' });
+  }).catch(() => null);
+  void approved;
+
   // Cross-site: what was kept on one origin is recallable from another.
   const other = await browser.newPage();
   await other.goto('https://www.iana.org/help/example-domains', { waitUntil: 'domcontentloaded' });

@@ -59,6 +59,32 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
 });
 
+/*
+ * Keyboard is the point of a standby tool. Reaching for a button is already more
+ * friction than most things are worth; a keystroke while you are still reading is
+ * not. Both shortcuts act on the tab you are looking at — nothing is ever typed,
+ * pasted or addressed by URL.
+ */
+chrome.commands.onCommand.addListener(async (command) => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  if (command === 'keep-selection') {
+    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
+  }
+  if (command === 'keep-page') {
+    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-page' });
+  }
+});
+
+/** The side panel asks for this when you press "Keep this page". */
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== 'autorag:panel-capture') return;
+  void (async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: message.what });
+  })();
+});
+
 // Clicking the toolbar icon opens the review panel beside whatever you are reading.
 chrome.action.onClicked.addListener((tab) => {
   if (tab.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId });

@@ -85,6 +85,7 @@ function showButton(rect: DOMRect, text: string) {
     setTimeout(removeButton, 1800);
   });
 
+
   document.body.appendChild(button);
 }
 
@@ -111,19 +112,76 @@ document.addEventListener('mousedown', (event) => {
   if ((event.target as HTMLElement)?.id !== BUTTON_ID) removeButton();
 });
 
-/** The context menu also routes here, so both entry points share one code path. */
+/* ---------- shared capture path ---------- */
+
+/** Brief confirmation at the corner, so a keystroke is not a silent no-op. */
+function toast(message: string, tone: 'ok' | 'warn' | 'bad' = 'ok') {
+  const el = document.createElement('div');
+  el.textContent = message;
+  Object.assign(el.style, {
+    position: 'fixed',
+    bottom: '18px',
+    right: '18px',
+    zIndex: '2147483647',
+    padding: '9px 14px',
+    font: '500 13px/1 ui-sans-serif, system-ui, sans-serif',
+    color: '#fff',
+    background: tone === 'ok' ? '#1a7f37' : tone === 'warn' ? '#9e6a03' : '#b62324',
+    borderRadius: '8px',
+    boxShadow: '0 4px 16px rgba(0,0,0,.3)',
+    pointerEvents: 'none',
+  } satisfies Partial<CSSStyleDeclaration>);
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2200);
+}
+
+async function keep(text: string, what: string) {
+  if (text.trim().length < 50) {
+    toast(`Nothing to keep — ${what} is under 50 characters.`, 'warn');
+    return;
+  }
+  toast('Keeping…', 'warn');
+  const res = await chrome.runtime.sendMessage(
+    envelope('worker', {
+      kind: 'ingest',
+      text: text.trim(),
+      sourceUrl: location.href,
+      title: document.title || location.hostname,
+    }),
+  );
+  if (res?.ok) {
+    const n = (res.data as { conflicts?: unknown[] })?.conflicts?.length ?? 0;
+    toast(n ? `Kept · ${n} conflict${n > 1 ? 's' : ''} to review` : 'Kept · awaiting your review');
+  } else {
+    toast(String(res?.error ?? 'Failed to keep'), 'bad');
+  }
+}
+
+/**
+ * The readable body of the page, for "keep what I am reading" when nothing is
+ * highlighted. Deliberately crude — <article> or <main> if the page has one,
+ * otherwise the body with the furniture stripped. A perfect extractor is a
+ * different project; this only has to beat asking a person to select 2000 words.
+ */
+function readablePageText(): string {
+  const root =
+    document.querySelector('article') ??
+    document.querySelector('main') ??
+    document.querySelector('[role="main"]') ??
+    document.body;
+  const clone = root.cloneNode(true) as HTMLElement;
+  clone
+    .querySelectorAll('script,style,nav,header,footer,aside,noscript,form,button,svg')
+    .forEach((n) => n.remove());
+  return (clone.textContent ?? '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Context menu and keyboard shortcuts all land here, sharing one code path. */
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'autorag:capture-selection') {
-    const text = (window.getSelection()?.toString() ?? '').trim();
-    if (text.length >= 50) {
-      void chrome.runtime.sendMessage(
-        envelope('worker', {
-          kind: 'ingest',
-          text,
-          sourceUrl: location.href,
-          title: document.title || location.hostname,
-        }),
-      );
-    }
+    void keep(window.getSelection()?.toString() ?? '', 'your selection');
+  }
+  if (message?.type === 'autorag:capture-page') {
+    void keep(readablePageText(), 'this page');
   }
 });

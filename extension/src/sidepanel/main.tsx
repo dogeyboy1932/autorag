@@ -158,6 +158,54 @@ function Recall() {
   );
 }
 
+/**
+ * What you are looking at right now, and one press to keep it.
+ *
+ * There is no field here on purpose. The tab is the source; asking a person to
+ * name it would be asking them to retype something the browser already knows.
+ */
+function CurrentTab() {
+  const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
+
+  useEffect(() => {
+    const read = async () => {
+      const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+      setTab(t ?? null);
+    };
+    void read();
+    chrome.tabs.onActivated.addListener(read);
+    chrome.tabs.onUpdated.addListener(read);
+    return () => {
+      chrome.tabs.onActivated.removeListener(read);
+      chrome.tabs.onUpdated.removeListener(read);
+    };
+  }, []);
+
+  const capture = (what: string) =>
+    chrome.runtime.sendMessage({ type: 'autorag:panel-capture', what });
+
+  return (
+    <section>
+      <h2>Reading now</h2>
+      <div className="card">
+        <span className="src" title={tab?.url}>
+          {tab?.title || tab?.url || 'no active tab'}
+        </span>
+        <div className="row">
+          <button className="primary" onClick={() => capture('autorag:capture-page')}>
+            Keep this page
+          </button>
+          <button onClick={() => capture('autorag:capture-selection')}>Keep selection</button>
+        </div>
+        <p className="note" style={{ margin: '8px 0 0' }}>
+          Or just highlight anything on the page. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> keeps
+          a selection, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> keeps the article.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const { pending, stats, refresh } = useCorpus();
 
@@ -170,6 +218,8 @@ function App() {
         </span>
       </header>
 
+      <CurrentTab />
+
       {stats && !stats.model_ready && (
         <p className="note warn">
           Loading the embedding model (~25MB, once). Captures will queue until it is ready.
@@ -180,7 +230,7 @@ function App() {
         <h2>To review {pending.length > 0 && <span className="pill">{pending.length}</span>}</h2>
         {pending.length === 0 ? (
           <p className="empty">
-            Nothing waiting. Highlight text on any page and press <strong>Keep</strong>.
+            Nothing waiting. Keep something and it lands here within a second or two.
           </p>
         ) : (
           pending.map((item) => <ReviewCard key={item.chunk_id} item={item} onDone={refresh} />)
