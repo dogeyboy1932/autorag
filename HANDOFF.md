@@ -2,7 +2,7 @@
 
 **Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
 WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 9 commits, **nothing pushed yet.**
+**Last worked:** 2026-09-01. **Branch:** `main`, 10 commits, **nothing pushed yet.**
 
 ---
 
@@ -10,18 +10,21 @@ WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 9 commits, all local
+git log --oneline          # 10 commits, all local
 pnpm install               # if node_modules is missing
 pnpm dev                   # http://localhost:3111
 pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25
+pnpm loop                  # whole product through WebMCP on Brave; must print 15/15
 ```
 
 Then read, in order: **`MANUAL.md`** (what it is, how to test it) →
-**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 14 findings, all
+**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 15 findings, all
 verified by running them) → **`lib/tool-design/TOOL-CONTRACT.md`** (the 15 tool schemas).
 
 **Chrome must be launched as** `google-chrome --enable-features=WebMCP`.
 The switch `--enable-webmcp-testing` does *not* work despite the flag existing.
+**Brave works too** — `brave-browser --enable-features=WebMCP`, verified native on
+Chromium 152. `pnpm loop` runs the whole product against it: 15/15.
 
 ---
 
@@ -103,6 +106,13 @@ gate is therefore in-page, which is the better design anyway.
 
 **D5 — `inputSchema` differs by Chrome version.** Native 149–153 returns a serialized
 string; 154+ and the polyfill return an object. Always use `normalizeInputSchema()`.
+
+**D15 — resetting a form cancels the invocation it is answering.** Found by running on
+Brave. The declarative form cleared its fields on success; on Chromium 152 that reset
+kills the agent's pending call *after* the passage is staged — `UnknownError: Tool
+execution cancelled by a form reset`. D11's shape by a different route. Reset only when
+`!submit.agentInvoked`. **Chrome 151 passed this; Brave caught it.** That is the whole
+argument for `pnpm loop --executable <path>` on more than one engine.
 
 **D14 — a declarative `<form>` tool is discoverable long before it is callable.** The
 one that had been wrongly marked verified. `toolautosubmit` (spelled `toolautosubmit=""`
@@ -268,13 +278,13 @@ HANDOFF.md         ← this file
 HUMAN-TASKS.md     ← what only the user can do
 SUBMISSION.md      ← Devpost draft, four required questions answered
 README.md          ← technical README for judges
-lib/webmcp/API-DELTA.md        ← 14 verified findings. Highest-value doc.
+lib/webmcp/API-DELTA.md        ← 15 verified findings. Highest-value doc.
 lib/tool-design/TOOL-CONTRACT.md  ← all 15 tool schemas
 lib/demo/DEMO-SCRIPT.md        ← shot-by-shot video script
 lib/rag/chunking-notes.md      ← chunk sizes, normalization, backend choice
 bench/             ← retrieval benchmark (pnpm bench)
 evals/             ← 11 QA pairs + seed corpus + RESULTS.md (run, but not blind)
-probes/            ← standalone pages used to establish API-DELTA facts
+probes/            ← webmcp-loop.mjs (pnpm loop) + pages used to establish API-DELTA facts
 src/rag/           ← embed · chunk · store · search · lexical · screen · ingest · bus
 src/webmcp/        ← registry · lifecycle · errors · tools/
 components/        ← ReviewQueue (the star of the video), CorpusView, ActivityLog, …
@@ -290,7 +300,11 @@ pnpm build
 pnpm bench                    # 21/21, 3/3, 25/25
 ```
 
-And then, because `pnpm bench` cannot catch a D12- or D14-class failure, call **both
+Then `pnpm loop`, which is the automated version of everything below — fifteen
+assertions driven through `executeTool`, exiting non-zero on any failure. Run it on a
+second engine before believing a green result; D15 was green on Chrome and red on Brave.
+
+And by hand, because a green suite is not the same as watching it work, call **both
 registration paths** through the MCP bridge:
 
 > Using chrome-devtools, call `autorag_get_stats` on http://localhost:3111.

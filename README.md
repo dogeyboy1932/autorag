@@ -203,10 +203,11 @@ pnpm install
 pnpm dev          # http://localhost:3111
 ```
 
-WebMCP needs Chrome 149+. Enable it with:
+WebMCP needs a Chromium 149+ build. Enable it with:
 
 ```bash
 google-chrome --enable-features=WebMCP
+brave-browser --enable-features=WebMCP     # works too, verified on Chromium 152
 ```
 
 The `chrome://flags/#enable-webmcp-testing` entry exists, but the matching
@@ -219,11 +220,30 @@ progress honestly; it is not frozen.
 
 ### Where this has been tested
 
-Chrome 151 with `--enable-features=WebMCP`, both native and through the
-`@mcp-b/global` polyfill, on the dev server and on the production static export.
+| Browser | WebMCP | Result |
+|---|---|---|
+| Chrome 151 | native, `--enable-features=WebMCP` | full loop, dev server and static export |
+| Chrome 151 | `@mcp-b/global` polyfill | full loop |
+| **Brave 1.94.117** (Chromium 152) | native, `--enable-features=WebMCP` | **15/15** — `pnpm loop` |
+| Brave 1.94.117 | `@mcp-b/global` polyfill | tools register and execute |
+
+Brave ships the feature: launch it with `--enable-features=WebMCP` and
+`document.modelContext` is there before any page script runs. Without the flag the
+polyfill takes over and the page still works.
+
+Run the conformance suite against any Chromium build yourself:
+
+```bash
+pnpm loop                                        # Brave
+pnpm loop --executable /usr/bin/google-chrome    # Chrome
+```
+
+It drives the entire product through `executeTool` — never the UI — and exits non-zero
+on any failure. Testing on two engines was not ceremony: **D15 is a bug Chrome 151
+passed and Brave caught.**
 
 Other WebMCP hosts — ChatGPT's in-app browser among them — are **untested**. The tool
-surface is standard `document.modelContext` with no Chrome-specific calls, so it should
+surface is standard `document.modelContext` with no browser-specific calls, so it should
 port, but we have not run it and do not claim it.
 
 ---
@@ -249,6 +269,7 @@ Chrome 151, including three findings that changed the design:
 
 ```
 bench/          retrieval benchmark (pnpm bench)
+probes/         cross-browser WebMCP conformance run (pnpm loop) + API-DELTA probes
 app/            page shell
 components/     ReviewQueue (the human gate), CorpusView, ActivityLog, declarative form
 src/rag/        embed · chunk · store · search · screen · ingest

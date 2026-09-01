@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start -p 3111",
     "typecheck": "tsc --noEmit",
-    "bench": "node bench/retrieval.mjs"
+    "bench": "node bench/retrieval.mjs",
+    "loop": "node probes/webmcp-loop.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

@@ -363,3 +363,34 @@ Two smaller things fell out of the same test:
 evidence a tool works, in the same way that a passing page-script test was not evidence
 a result reaches an agent. The only evidence is a call through the consumer's path that
 comes back with the right answer *and* leaves the right state behind.
+
+---
+
+## D15. Resetting a form cancels the tool invocation it is answering
+
+**Verified 2026-09-01 on Brave 1.94.117 / Chromium 152. Chrome 151 did not surface it.**
+
+The declarative form's submit handler cleared its fields after a successful ingest —
+ordinary courtesy to whoever typed in them. On Chromium 152 that reset lands while the
+agent's invocation is still pending on the same form, and the runtime cancels it:
+
+```
+DOMException: UnknownError: Tool execution cancelled by a form reset
+```
+
+The passage was already chunked, embedded and staged. The agent was told the call
+failed. **This is D11's shape exactly** — work committed, caller handed an opaque error
+— reached by a different route: there, aborting a tool group killed its own in-flight
+execution; here, resetting a form kills the invocation bound to it. The polyfill
+documents reset as a cancellation ("Resetting, removing, or replacing a registration
+cancels a pending invocation"); what is easy to miss is that *your own success path* is
+one of the things that resets a form.
+
+**Fix:** `if (!submit.agentInvoked) form.reset();` — clear the fields only for a human
+submission. Nobody typed into them on the agent path, and leaving them filled has the
+side benefit of showing on screen what the agent actually submitted.
+
+**Why Chrome 151 missed it.** Both browsers stage the passage; they differ in whether
+the reset arrives before the response is delivered. A timing-dependent bug on one
+engine version is a certainty on another, which is the argument for
+`pnpm loop --executable <path>` running on more than one browser.

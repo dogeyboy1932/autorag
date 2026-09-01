@@ -12,5 +12,22 @@ not part of the deployed build.
   `inputSchema` comes back as a string or an object, and whether `AbortController`
   actually unregisters.
 
-To run one, serve the repo root and open the file, or copy it into `public/`
-temporarily.
+- `webmcp-loop.mjs` — the whole product as fifteen assertions, driven entirely through
+  `document.modelContext.executeTool`. Empty-memory tool registration, ingest, conflict
+  flagging, agent adjudication, human rejection, approval (which retracts its own tool
+  group), retrieval with provenance, rejection replay, the declarative `<form>` path,
+  structured errors, `inputSchema` shape, and a check for uncaught rejections.
+
+```bash
+pnpm dev                                    # in another terminal
+pnpm loop                                   # Brave, the default
+pnpm loop --executable /usr/bin/google-chrome
+pnpm loop --url https://your-deploy.example
+```
+
+It launches with a throwaway profile — your real profile is never touched — and exits
+non-zero if any check fails. Run it on more than one browser: D15 was a timing-dependent
+failure that Chrome 151 passed and Brave/Chromium 152 caught.
+
+To run one of the HTML probes, serve the repo root and open the file, or copy it into
+`public/` temporarily.

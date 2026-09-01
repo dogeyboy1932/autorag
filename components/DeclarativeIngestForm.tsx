@@ -101,7 +101,18 @@ export default function DeclarativeIngestForm() {
     work.then(
       (result) => {
         setNote(`Staged ${result.chunk_count} chunk(s) for review. ${result.conflict_summary}`);
-        form.reset();
+        /*
+         * D15: only for a person. Resetting a form cancels any tool invocation
+         * pending on it, and on Chromium 152 that includes the invocation being
+         * answered right now — the agent gets `UnknownError: Tool execution
+         * cancelled by a form reset` instead of the result, after the passage has
+         * already been staged. Same shape as D11: work committed, caller told it
+         * failed. Chrome 151 did not surface it; Brave 1.94 does.
+         *
+         * Clearing the fields is a courtesy to whoever typed in them. Nobody typed
+         * in them here.
+         */
+        if (!submit.agentInvoked) form.reset();
       },
       (err: unknown) => setNote(err instanceof Error ? err.message : String(err)),
     );

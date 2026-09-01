@@ -85,6 +85,12 @@ only channel back to the agent. Then the envelope bug above bit a second time on
 path. Fixed and verified by calling it — it now returns a result *and* stages the
 passage.
 
+And one more, found only by running on a second browser: our form cleared its own
+fields on success, which on Chromium 152 cancels the agent's still-pending invocation —
+`UnknownError: Tool execution cancelled by a form reset`, after the passage had been
+stored. Chrome 151 passed it; Brave caught it. Reset the form for a person, never for an
+agent.
+
 That is the lesson of this project in one bug: **appearing in `getTools()` is not
 evidence a tool works.** The only evidence is a call through the path the consumer uses
 that comes back right and leaves the right state behind.
@@ -156,10 +162,11 @@ deposits passages it finds while browsing; Autorag chunks, embeds and screens th
 locally, then stages them for human approval. Approved passages become searchable in
 every future session, with provenance attached to every result.
 
-**Tested surface.** Chrome 151 with `--enable-features=WebMCP`, native and polyfilled,
-on both the dev server and the production static export, and end-to-end through an MCP
-bridge rather than only from page script. We have not tested other WebMCP hosts and make
-no claim about them.
+**Tested surface.** Chrome 151 and Brave 1.94.117 (Chromium 152), both with
+`--enable-features=WebMCP`, native and polyfilled, on the dev server and the production
+static export, and end-to-end through an MCP bridge rather than only from page script.
+`pnpm loop` reruns the whole product as fifteen assertions against any Chromium build.
+We have not tested other WebMCP hosts and make no claim about them.
 
 **How does it use WebMCP?**
 14 tools registered imperatively on `document.modelContext`, plus one derived
