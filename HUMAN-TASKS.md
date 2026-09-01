@@ -5,41 +5,16 @@ browser, or your face and voice.
 
 ---
 
-## 1. Test the app inside ChatGPT's browser  ⬅ the one you asked about
+## 1. ~~Test the app inside ChatGPT's browser~~ — DEFERRED
 
-**What this even is.** ChatGPT has a web browser built into it. When you ask ChatGPT
-to go look at a website, it opens that page inside itself. If the page has WebMCP
-tools on it — like ours does — ChatGPT can *use* those tools instead of just reading
-the text.
+**Decision (Aug 31): skipped.** We target Chrome only.
 
-**Why it matters for us.** The judges get a link to our live site. Some of them will
-open it in Chrome. Some will open it inside ChatGPT. Those are two different browsers
-with two different WebMCP implementations. Ours is fully tested in Chrome. It has
-**never been tested inside ChatGPT**, so we genuinely do not know if it works there.
+The docs now say plainly that Chrome 151 is the tested surface and that other WebMCP
+hosts are untested, rather than implying coverage we never checked. Nothing is blocked
+on this.
 
-**Why you and not Claude.** It needs a logged-in ChatGPT account. Claude has no way
-to drive one.
-
-**What to actually do**, once the app is deployed and you have a URL:
-
-1. Open ChatGPT.
-2. Paste this, with our real URL swapped in:
-   > Open https://OUR-URL-HERE and tell me what tools the page offers you.
-3. It should list tools whose names start with `autorag_`. There should be about
-   four at first: `autorag_ingest_passage`, `autorag_check_conflicts`,
-   `autorag_get_stats`, `autorag_list_sources`.
-4. Then paste:
-   > Use the autorag_get_stats tool on that page and show me exactly what it returns.
-5. It should return a block of JSON with things like `chunk_count` and `model_ready`.
-
-**Tell Claude which of these happened:**
-- ✅ It listed the tools and the stats came back → we're fine, nothing to change.
-- ⚠️ It listed the tools but calling one failed → copy the error text to Claude.
-- ❌ It couldn't see any tools at all → tell Claude; the README has to stop claiming
-  ChatGPT support, and that changes what we say in the submission.
-
-**When.** As soon as there's a deployed URL. Do not leave this to the last night — if
-it fails, we need time to react.
+If you ever want to revisit: deploy, open ChatGPT, and ask it to open the URL and list
+the tools the page offers. Names starting with `autorag_` mean it works.
 
 ---
 

@@ -111,6 +111,10 @@ deposits passages it finds while browsing; Autorag chunks, embeds and screens th
 locally, then stages them for human approval. Approved passages become searchable in
 every future session, with provenance attached to every result.
 
+**Tested surface.** Chrome 151 with `--enable-features=WebMCP`, native and polyfilled,
+on both the dev server and the production static export. We have not tested other
+WebMCP hosts and make no claim about them.
+
 **How does it use WebMCP?**
 14 tools registered imperatively on `document.modelContext`, plus one derived
 declaratively from an annotated HTML `<form>`. Tool groups are registered and retracted

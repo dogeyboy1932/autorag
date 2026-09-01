@@ -131,6 +131,15 @@ polyfill for browsers without native support.
 First load downloads ~25MB of model weights and caches them. The badge reports
 progress honestly; it is not frozen.
 
+### Where this has been tested
+
+Chrome 151 with `--enable-features=WebMCP`, both native and through the
+`@mcp-b/global` polyfill, on the dev server and on the production static export.
+
+Other WebMCP hosts — ChatGPT's in-app browser among them — are **untested**. The tool
+surface is standard `document.modelContext` with no Chrome-specific calls, so it should
+port, but we have not run it and do not claim it.
+
 ---
 
 ## Verified, not assumed

@@ -182,8 +182,12 @@ while building.
 | Works on native Chrome 151 | ✓ |
 | Works on `@mcp-b/global` polyfill | ✓ |
 
-Not yet done, and still owed from build plan §6 Phase 0: transformers.js model
-download on Vercel, and the deployed round-trip inside ChatGPT's in-app browser.
+Not yet done, and still owed from build plan §6 Phase 0: the transformers.js model
+download from a deployed origin.
+
+**ChatGPT's in-app browser is explicitly out of scope** (decided 2026-08-31). We
+verify against flag-enabled Chrome 151 only, and the README says so rather than
+implying coverage we have not tested.
 
 ---
 
