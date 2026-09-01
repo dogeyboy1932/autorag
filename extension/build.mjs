@@ -88,8 +88,31 @@ function copyOnnxRuntime() {
   console.log(`vendored ${n} onnxruntime files into dist/ort/`);
 }
 
+/*
+ * Vendor the relay embed.
+ *
+ * Same reason as the ONNX runtime: MV3 forbids loading scripts from a CDN, and
+ * the relay's own docs assume a `<script src="https://cdn.jsdelivr.net/...">`.
+ * We ship embed.js, widget.html and widget.js inside the extension and serve
+ * them from web_accessible_resources instead. The embed fetches widget.html as a
+ * sibling of its own URL, so all three must land in the same directory.
+ */
+function copyRelay() {
+  const store = resolve(root, 'node_modules/.pnpm');
+  const pkg = readdirSync(store).find((d) => d.startsWith('@mcp-b+webmcp-local-relay@'));
+  if (!pkg) throw new Error('@mcp-b/webmcp-local-relay not found in the pnpm store');
+  const from = resolve(store, pkg, 'node_modules/@mcp-b/webmcp-local-relay/dist/browser');
+  const dest = resolve(out, 'relay');
+  mkdirSync(dest, { recursive: true });
+  for (const file of ['embed.js', 'widget.html', 'widget.js']) {
+    cpSync(resolve(from, file), resolve(dest, file));
+  }
+  console.log('vendored the relay embed into dist/relay/');
+}
+
 function copyStatic() {
   copyOnnxRuntime();
+  copyRelay();
   cpSync(resolve(here, 'manifest.json'), resolve(out, 'manifest.json'));
   cpSync(resolve(here, 'src/sidepanel/index.html'), resolve(out, 'sidepanel.html'));
   cpSync(resolve(here, 'src/sidepanel/sidepanel.css'), resolve(out, 'sidepanel.css'));

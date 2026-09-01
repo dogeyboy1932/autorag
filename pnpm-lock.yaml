@@ -14,6 +14,9 @@ importers:
       '@mcp-b/global':
         specifier: ^5.1.0
         version: 5.1.0
+      '@mcp-b/webmcp-local-relay':
+        specifier: ^5.1.0
+        version: 5.1.0
       idb:
         specifier: ^8.0.3
         version: 8.0.3
@@ -509,6 +512,11 @@ packages:
   '@mcp-b/transports@5.1.0':
     resolution: {integrity: sha512-x+Czu2ZcUaLuiVAzViFMfno2NwPkHIfmUVYP3VeCa0tbAuZ8jRPrgboUuk86bVF0FI3qZ8u7OX7UUR3WmwVsKw==}
     engines: {node: '>=20'}
+
+  '@mcp-b/webmcp-local-relay@5.1.0':
+    resolution: {integrity: sha512-C5Q5DPgXLoLlQQ3VlIvUnDbnxX5Xh1t4byXpwqJbkayqmekW1luEj69Zo36rsSN6bVlKlrgPsEaJIacjhdSsFw==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   '@mcp-b/webmcp-polyfill@5.1.0':
     resolution: {integrity: sha512-KL09hniFssPY8HBO3qzurWPqm+1JYRwV3wx6x2XSySgo+6BL1XHGsHGIoAO7U9zzigv7TA5keNBoZ+3P1jq18g==}
@@ -1298,6 +1306,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
   zod@4.5.4:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
@@ -1610,6 +1621,16 @@ snapshots:
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
       '@modelcontextprotocol/server': 2.0.0
+
+  '@mcp-b/webmcp-local-relay@5.1.0':
+    dependencies:
+      '@modelcontextprotocol/core': 2.0.0
+      '@modelcontextprotocol/server': 2.0.0
+      ws: 8.21.3
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   '@mcp-b/webmcp-polyfill@5.1.0':
     dependencies:
@@ -2429,5 +2450,7 @@ snapshots:
       fd-slicer: 1.1.0
 
   zod@3.25.76: {}
+
+  zod@4.4.3: {}
 
   zod@4.5.4: {}

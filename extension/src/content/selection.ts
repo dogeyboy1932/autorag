@@ -37,6 +37,49 @@ window.addEventListener('message', async (event) => {
   window.postMessage({ type: PAGE_RESPONSE, id: msg.id, result }, window.location.origin);
 });
 
+/* ---------- 3. bridge out: make this tab visible to a desktop MCP client ---- */
+
+/**
+ * Injects the local relay's embed script into the page.
+ *
+ * This is the consuming half of WebMCP, and it is the piece that makes the tools
+ * worth publishing. The embed opens a WebSocket to a relay process on loopback,
+ * which any desktop MCP client can speak to over stdio — so the agent you already
+ * use can call `autorag_recall` against the memory in this browser. No API key,
+ * no cloud, no bespoke integration with us.
+ *
+ * It must be injected from here rather than from the MAIN world, because only an
+ * isolated content script can resolve `chrome-extension://` URLs. And it must be
+ * vendored rather than loaded from a CDN, because MV3 forbids the latter.
+ *
+ * Costs nothing when no relay is running: the embed simply never connects.
+ */
+function connectRelay() {
+  /*
+   * Only on http origins, and that is a hard limit rather than caution.
+   *
+   * The relay widget reaches the relay process over `ws://127.0.0.1`. From an
+   * `https://` page the browser kills that socket during the handshake. Isolated
+   * with everything else held identical — same relay, same extension, same MCP
+   * client attached first, only the page origin different:
+   *
+   *   http://localhost:3901/   -> sources: 1
+   *   https://example.com/     -> sources: 0, "WebSocket is closed before the
+   *                               connection is established"
+   *
+   * Injecting it anyway would mean every https page you open silently
+   * port-scans 9333-9348 and fails sixteen times. So: skip it where it cannot
+   * work. See API-DELTA D16.
+   */
+  if (location.protocol !== 'http:') return;
+  const el = document.createElement('script');
+  el.src = chrome.runtime.getURL('relay/embed.js');
+  el.dataset.autorag = 'relay';
+  (document.head ?? document.documentElement).appendChild(el);
+  el.remove(); // it has executed by now; do not leave furniture in the page
+}
+connectRelay();
+
 /* ---------- 1. human path: the selection affordance ---------- */
 
 const BUTTON_ID = 'autorag-keep-button';

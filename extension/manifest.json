@@ -49,7 +49,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "models/*",
+        "relay/*",
+        "ort/*",
         "sidepanel.html"
       ],
       "matches": [
@@ -59,7 +60,7 @@
   ],
   "minimum_chrome_version": "116",
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.hf.co https://*.hf.co"
   },
   "commands": {
     "keep-selection": {

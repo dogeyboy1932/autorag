@@ -23,6 +23,7 @@ import {
 } from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
+import '@mcp-b/global';
 import { isEnvelope, type Event, type Request, type Response } from '../protocol';
 
 /*
@@ -248,3 +249,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   );
   return true; // keep the channel open for the async reply
 });
+
+
+/* ------------------------------------------------------------------------- */
+/* The bridge out: attempted here, and it does not work. See API-DELTA D17.    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * This document is the obvious home for a desktop bridge: it owns the corpus, it
+ * outlives the tabs, and its `chrome-extension://` origin is a secure context
+ * allowed to hold a `ws://127.0.0.1` socket (see the manifest CSP).
+ *
+ * It cannot host one. `document.modelContext.registerTool()` rejects with
+ * `SecurityError` on an extension-page origin — measured, all three tools, every
+ * time. So the WebMCP surface can only live on ordinary web pages, which is
+ * where `content/webmcp.ts` puts it.
+ *
+ * That leaves the desktop path genuinely blocked for normal browsing: the page
+ * that *can* register tools cannot reach the relay over https (D16), and the
+ * document that *can* reach the relay cannot register tools (D17). Recorded here
+ * rather than deleted, because the next person to reach for this will otherwise
+ * spend the same afternoon on it.
+ */

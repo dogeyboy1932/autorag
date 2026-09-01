@@ -394,3 +394,62 @@ side benefit of showing on screen what the agent actually submitted.
 the reset arrives before the response is delivered. A timing-dependent bug on one
 engine version is a certainty on another, which is the argument for
 `pnpm loop --executable <path>` running on more than one browser.
+
+---
+
+## D16. The local relay cannot bridge an `https://` page
+
+**Verified 2026-09-01, Brave 1.94.117 / Chromium 152, `@mcp-b/webmcp-local-relay@5.1.0`.**
+
+`@mcp-b/webmcp-local-relay` is the documented way to let a desktop MCP client call
+browser tools. Its widget reaches the relay process over `ws://127.0.0.1:9333`. From an
+`https://` page the browser kills that socket during the handshake.
+
+Isolated with everything else held identical — same relay process, same extension, the
+MCP client `initialize`d before any page loaded, only the page origin varying:
+
+```
+http://localhost:3901/     ->  webmcp_list_sources: { "count": 1 }
+https://example.com/       ->  webmcp_list_sources: { "count": 0 }
+    console: WebSocket connection to 'ws://127.0.0.1:9333/' failed:
+             WebSocket is closed before the connection is established.
+```
+
+The widget itself is fine: the blob iframe is created, and it scans 9333 through 9348.
+Every socket dies. On the http origin the first one connects.
+
+This was worth isolating carefully, because the first comparison changed two variables
+at once (scheme *and* whether the MCP client had initialized) and would have supported
+the wrong conclusion.
+
+**Consequence:** the relay is usable for a page you serve yourself on localhost. It
+cannot carry tools from the sites a person actually browses.
+
+## D17. `registerTool` rejects with `SecurityError` on an extension-page origin
+
+**Verified 2026-09-01, same build.**
+
+The obvious fix for D16 is to move the bridge into the extension: an offscreen document
+owns the corpus, outlives every tab, and its `chrome-extension://` origin is a secure
+context that a manifest CSP can permit `ws://127.0.0.1:*` on.
+
+It does not work. `document.modelContext.registerTool()` rejects there with
+`SecurityError` — all three tools, every attempt, on both the native surface and the
+`@mcp-b/global` polyfill:
+
+```
+Could not publish autorag_recall:        SecurityError
+Could not publish autorag_memory_stats:  SecurityError
+Could not publish autorag_list_sources:  SecurityError
+```
+
+Note the error arrives as a bare object: `name` reads `SecurityError`, `message` is
+empty, and `JSON.stringify(err)` is `{}`. Logging `err.message` alone shows nothing at
+all, which is how this first appeared as three silent failures and a tool count that was
+simply short.
+
+**The two findings close the door on each other.** The document that can register tools
+(an ordinary web page) cannot reach the relay over https. The document that can reach
+the relay (an extension page) cannot register tools. Any desktop-agent bridge for normal
+browsing has to avoid both — extension messaging or native messaging rather than a
+loopback WebSocket from page context.
