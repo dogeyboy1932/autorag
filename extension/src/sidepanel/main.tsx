@@ -200,6 +200,133 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
   );
 }
 
+/* ------------------------------------------------------------------ corpus */
+
+interface Source {
+  source_id: string;
+  url: string;
+  title: string;
+  stale: boolean;
+  stale_reason: string | null;
+  ingested_at: string;
+  approved: number;
+  pending: number;
+  rejected: number;
+}
+
+/**
+ * Everything you have kept, and the two ways to change your mind about it.
+ *
+ * Marking a source out of date is the one to reach for: its passages stay
+ * searchable but rank lower and come back flagged, so the record of what you once
+ * believed survives. Forgetting is permanent and asks twice.
+ */
+function Corpus({ onChange }: { onChange: () => void }) {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setSources((await ask<Source[]>({ kind: 'listSources' })) ?? []);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void refresh();
+    const timer = setInterval(refresh, 2000);
+    return () => clearInterval(timer);
+  }, [open, refresh]);
+
+  async function act(request: Request) {
+    await ask(request);
+    setConfirming(null);
+    await refresh();
+    onChange();
+  }
+
+  return (
+    <section>
+      <h2>
+        <button className="linky" onClick={() => setOpen(!open)}>
+          {open ? '▾' : '▸'} Manage corpus{sources.length > 0 && ` (${sources.length})`}
+        </button>
+      </h2>
+
+      {open && (
+        <>
+          {sources.length === 0 ? (
+            <p className="empty">Nothing kept yet.</p>
+          ) : (
+            sources.map((s) => (
+              <div key={s.source_id} className="card">
+                <a className="src" href={s.url} target="_blank" rel="noreferrer">
+                  {s.title || s.url}
+                </a>
+                <p className="note">
+                  {s.approved} kept
+                  {s.pending > 0 && ` · ${s.pending} awaiting review`}
+                  {s.rejected > 0 && ` · ${s.rejected} discarded`} ·{' '}
+                  {new Date(s.ingested_at).toLocaleDateString()}
+                </p>
+                {s.stale && (
+                  <p className="note warn">
+                    Out of date — demoted in ranking. {s.stale_reason}
+                  </p>
+                )}
+                <div className="row">
+                  {s.stale ? (
+                    <button
+                      onClick={() => act({ kind: 'markStale', sourceId: s.source_id, stale: false })}
+                    >
+                      Still current
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        act({
+                          kind: 'markStale',
+                          sourceId: s.source_id,
+                          stale: true,
+                          reason: 'Marked out of date from the panel.',
+                        })
+                      }
+                    >
+                      Mark out of date
+                    </button>
+                  )}
+                  {confirming === s.source_id ? (
+                    <button className="danger" onClick={() => act({ kind: 'forget', sourceId: s.source_id })}>
+                      Really forget?
+                    </button>
+                  ) : (
+                    <button className="danger" onClick={() => setConfirming(s.source_id)}>
+                      Forget
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+
+          {sources.length > 0 && (
+            <div className="row" style={{ marginTop: 4 }}>
+              {confirming === '__all__' ? (
+                <button className="danger" onClick={() => act({ kind: 'wipe' })}>
+                  Really erase everything?
+                </button>
+              ) : (
+                <button className="danger" onClick={() => setConfirming('__all__')}>
+                  Erase the whole corpus
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /* ---------------------------------------------------------------- activity */
 
 function Activity() {
@@ -394,6 +521,7 @@ function App() {
       </section>
 
       <Recall />
+      <Corpus onChange={refresh} />
       <Activity />
     </div>
   );

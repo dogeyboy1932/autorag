@@ -60,3 +60,7 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .dot.working { background: var(--warn); }
 .dot.done { background: var(--ok); }
 .dot.failed { background: var(--bad); }
+.linky { background: none; border: none; padding: 0; color: var(--muted);
+  font: inherit; text-transform: uppercase; letter-spacing: .06em;
+  font-weight: 600; font-size: 12px; cursor: pointer; }
+.linky:hover { color: var(--fg); }

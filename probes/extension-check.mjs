@@ -298,6 +298,26 @@ try {
       : `no preview (${probe.error ?? 'unknown'})`,
   );
 
+  const managed = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'm', request: req }, res),
+      );
+    const before = (await send({ kind: 'listSources' })).data;
+    const id = before[0]?.source_id;
+    if (!id) return { error: 'no sources to manage' };
+    const staled = (await send({ kind: 'markStale', sourceId: id, stale: true, reason: 'test' })).data;
+    const forgot = (await send({ kind: 'forget', sourceId: id })).data;
+    const after = (await send({ kind: 'listSources' })).data;
+    return { count: before.length, staled, forgot, remaining: after.length };
+  });
+  log(
+    'the corpus can be managed: mark out of date, forget',
+    managed.staled?.stale === true && managed.forgot?.chunks_removed >= 1 &&
+      managed.remaining === managed.count - 1,
+    managed.error ?? `${managed.count} → ${managed.remaining} sources after forgetting one`,
+  );
+
   log(
     'the panel can prove WebMCP is live on the tab',
     probe.webmcp?.present === true &&

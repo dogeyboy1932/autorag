@@ -26,6 +26,9 @@ export type Request =
   | { kind: 'listSources' }
   | { kind: 'approve'; chunkIds: string[] }
   | { kind: 'reject'; chunkIds: string[]; reason: string }
+  | { kind: 'markStale'; sourceId: string; stale: boolean; reason?: string }
+  | { kind: 'forget'; sourceId: string }
+  | { kind: 'wipe' }
   | { kind: 'warmup' }
   | { kind: 'activity' };
 

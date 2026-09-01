@@ -12,7 +12,15 @@
 
 import { ingestPassage, dryRun } from '@/src/rag/ingest';
 import { search, confidenceOf, coverageNote } from '@/src/rag/search';
-import { allChunks, allSources, countByStatus, decideChunks } from '@/src/rag/store';
+import {
+  allChunks,
+  allSources,
+  countByStatus,
+  decideChunks,
+  deleteSourceCascade,
+  setSourceStale,
+  wipeAll,
+} from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
 import { isEnvelope, type Event, type Request, type Response } from '../protocol';
@@ -170,14 +178,51 @@ async function handle(request: Request): Promise<unknown> {
 
     case 'listSources': {
       const [sources, chunks] = await Promise.all([allSources(), allChunks()]);
-      return sources.map((s) => ({
-        source_id: s.id,
-        url: s.url,
-        title: s.title,
-        stale: s.stale,
-        ingested_at: s.ingestedAt,
-        approved_chunks: chunks.filter((c) => c.sourceId === s.id && c.status === 'approved').length,
-      }));
+      return sources
+        .map((s) => {
+          const mine = chunks.filter((c) => c.sourceId === s.id);
+          return {
+            source_id: s.id,
+            url: s.url,
+            title: s.title,
+            stale: s.stale,
+            stale_reason: s.staleReason ?? null,
+            ingested_at: s.ingestedAt,
+            approved: mine.filter((c) => c.status === 'approved').length,
+            pending: mine.filter((c) => c.status === 'pending').length,
+            rejected: mine.filter((c) => c.status === 'rejected').length,
+          };
+        })
+        .sort((a, b) => b.ingested_at.localeCompare(a.ingested_at));
+    }
+
+    case 'markStale': {
+      const updated = await setSourceStale(
+        request.sourceId,
+        request.stale,
+        request.reason ?? 'Marked out of date.',
+      );
+      record(
+        'done',
+        request.stale
+          ? `Marked "${updated?.title ?? 'source'}" out of date — demoted, not deleted`
+          : `Cleared the stale flag on "${updated?.title ?? 'source'}"`,
+      );
+      return { source_id: request.sourceId, stale: updated?.stale ?? false };
+    }
+
+    case 'forget': {
+      const sources = await allSources();
+      const title = sources.find((s) => s.id === request.sourceId)?.title ?? 'source';
+      const removed = await deleteSourceCascade(request.sourceId);
+      record('done', `Forgot "${title}" and ${removed} passage(s) — permanently`);
+      return { forgotten: request.sourceId, chunks_removed: removed };
+    }
+
+    case 'wipe': {
+      await wipeAll();
+      record('done', 'Erased the entire corpus');
+      return { wiped: true };
     }
 
     case 'approve': {
