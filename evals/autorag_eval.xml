@@ -33,6 +33,11 @@
   </qa_pair>
 
   <qa_pair>
+    <question>Ingest all four seed sources in one batch without approving anything, then check the review queue. Does screening flag the disagreement between the two aggregators even though nothing has been approved yet?</question>
+    <answer>Yes — a contradiction conflict is flagged against the other staged passage</answer>
+  </qa_pair>
+
+  <qa_pair>
     <question>Ask Autorag whether it can answer "what is the capital of Mongolia". What coverage verdict does it return?</question>
     <answer>not_covered</answer>
   </qa_pair>
@@ -48,17 +53,17 @@
   </qa_pair>
 
   <qa_pair>
-    <question>Search the memory for "Denis Villeneuve" and report which source ranks first and what its score is rounded to two decimal places.</question>
-    <answer>Dune: Part Two - Wikipedia, 0.62</answer>
+    <question>Try to delete a source without confirming. Which tool does the error tell you to consider using instead?</question>
+    <answer>autorag_mark_stale</answer>
   </qa_pair>
 
   <qa_pair>
     <question>Using autorag_explain_retrieval for the query "streaming availability", how many candidates were considered and was any staleness demotion applied?</question>
-    <answer>5 candidates considered, staleness demotion applied to the JustWatch source</answer>
+    <answer>4 candidates considered, and yes — staleness demotion was applied to the JustWatch source</answer>
   </qa_pair>
 
   <qa_pair>
-    <question>Call autorag_search with an empty corpus filter that matches nothing, using the tag "nonexistent". What does the tool tell you to try next?</question>
-    <answer>Retry with include_stale true before concluding the memory lacks this</answer>
+    <question>Call autorag_search with the tag filter "nonexistent" so nothing matches. What does the tool tell you to try before concluding the memory lacks the material?</question>
+    <answer>Retry with include_stale set to true</answer>
   </qa_pair>
 </evaluation>

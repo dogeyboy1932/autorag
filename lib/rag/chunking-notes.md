@@ -47,3 +47,20 @@ try-webgpu-catch-retry-wasm shape does not work: the first attempt leaves
 onnxruntime-web with WebGPU pinned as its execution provider, so the "WASM" retry fails
 with the same WebGPU adapter error while claiming to be WASM. Verified in headless
 Chrome, where WebGPU is unavailable.
+
+
+## Screening compares against pending material, not just approved
+
+Non-obvious, and it broke the demo path before it was caught.
+
+An agent harvesting several sources does so in one burst, *before* the human has
+approved anything. If screening only compared an incoming chunk against **approved**
+chunks, a batch of four sources would be screened against an empty corpus four times
+over, and a flat contradiction between two of them would reach the review queue with no
+badge at all. Measured: 0 contradictions flagged on the four-source seed batch.
+
+So `screenChunk` considers all three statuses — approved (the established corpus),
+pending (the rest of this harvest), and rejected (so material the human already turned
+down is flagged rather than silently re-proposed). Conflicts against staged material
+say so in their detail text, since "also awaiting review" changes what the human should
+do about it. Same seed batch after the fix: 3 contradictions flagged.

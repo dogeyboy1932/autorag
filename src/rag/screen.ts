@@ -64,10 +64,17 @@ export interface Candidate {
 }
 
 /**
- * Screens one incoming chunk against the approved corpus. Also consults
- * previously *rejected* chunks so a source the human already turned down is
- * flagged rather than silently re-proposed — the rejection reason is retained
- * for exactly this.
+ * Screens one incoming chunk against everything already in the store.
+ *
+ * All three statuses matter, for different reasons:
+ *  - **approved** — the established corpus this passage might duplicate or contradict.
+ *  - **pending** — material staged but not yet decided. Screening against it is
+ *    essential: an agent typically harvests several sources in one burst, before
+ *    the human has approved anything. Comparing only against approved chunks
+ *    would mean a batch of four sources never gets cross-checked at all, and the
+ *    contradiction between two of them would reach the queue unflagged.
+ *  - **rejected** — so a source the human already turned down is flagged rather
+ *    than silently re-proposed. The rejection reason is retained for exactly this.
  */
 export function screenChunk(input: ScreenInput, candidates: Candidate[]): Conflict[] {
   const conflicts: Conflict[] = [];
@@ -88,7 +95,7 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
       }
       continue;
     }
-    if (chunk.status !== 'approved') continue;
+    const staged = chunk.status === 'pending';
 
     if (similarity < SAME_TOPIC_AT) continue;
 
@@ -112,7 +119,9 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
         kind: 'contradiction',
         againstChunkId: chunk.id,
         similarity,
-        detail: `Same subject as ${source.title}, but the figures differ (${differing.join(
+        detail: `Same subject as ${source.title}${
+          staged ? ' (also awaiting review)' : ''
+        }, but the figures differ (${differing.join(
           ', ',
         )}). Nominated for adjudication — not yet judged.`,
       });
@@ -124,7 +133,9 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
         kind: 'duplicate',
         againstChunkId: chunk.id,
         similarity,
-        detail: `Already in the corpus from ${source.title}.`,
+        detail: staged
+          ? `Identical to another passage already staged from ${source.title}.`
+          : `Already in the corpus from ${source.title}.`,
       });
       continue;
     }
@@ -134,7 +145,9 @@ export function screenChunk(input: ScreenInput, candidates: Candidate[]): Confli
         kind: 'near_duplicate',
         againstChunkId: chunk.id,
         similarity,
-        detail: `Restates existing material from ${source.title}.`,
+        detail: staged
+          ? `Restates another passage awaiting review from ${source.title}.`
+          : `Restates existing material from ${source.title}.`,
       });
       continue;
     }

@@ -1,4 +1,4 @@
-# TOOL-CONTRACT — Autorag's 13 tools
+# TOOL-CONTRACT — Autorag's 14 tools
 
 **Written before the implementation, deliberately.** `autorag-build-plan.md` §5:
 *the schemas are the product being judged.* `amendments.md` A5.2 is blunter — with
@@ -180,15 +180,35 @@ is the whole guard.
 
 ---
 
-# Deferred — do not implement yet
+## `autorag_check_coverage` — `readOnlyHint: true`  ✅ shipped
 
-Per `amendments.md` A3. If exactly one lands, make it `autorag_check_coverage`:
-given a question, return whether the corpus can answer it, with supporting chunks and
-a confidence signal — retrieval plus a score threshold, described honestly and not
-overclaimed as gap analysis.
+The one analysis tool `amendments.md` A3 endorsed, and only because there is real
+computation behind it: retrieval plus an explicit score threshold.
 
-`find_gaps` and `get_frontier` stay out unless there is real computation behind them.
-A thin wrapper over `search` is worse than not shipping it.
+Input: `question` (required), `threshold` (default 0.45).
+Returns `{ok, verdict, threshold, top_score, supporting_passages[], recommendation}`
+where `verdict` is `covered` | `partial` | `not_covered`.
+
+Deliberately **not** called gap analysis, in the description as well as here. It
+reports what the corpus *does* support for a given question; it cannot enumerate what
+is missing. Overclaiming it would be worse than not shipping it.
+
+---
+
+# Declarative API
+
+`autorag_submit_passage_form` is not registered in JavaScript at all — the browser
+derives it from an annotated `<form>` in `components/DeclarativeIngestForm.tsx`.
+Same capability as `autorag_ingest_passage`, second registration API, one repo.
+Verified present in `getTools()` on native Chrome 151.
+
+---
+
+# Still deferred — do not implement
+
+`find_gaps` and `get_frontier` stay out unless there is real computation behind them
+(coverage against a user-supplied topic outline, or sparse-region detection over the
+embedding space). A thin wrapper over `search` is worse than not shipping it.
 
 ---
 

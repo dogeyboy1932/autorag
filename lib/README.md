@@ -19,8 +19,8 @@ that shifted three months ago.
 |---|---|
 | `webmcp/API-DELTA.md` | ✅ written, empirically verified 2026-08-31 |
 | `tool-design/TOOL-CONTRACT.md` | ✅ written |
-| `rag/chunking-notes.md` | ⬜ Phase 1 |
-| `demo/DEMO-SCRIPT.md` | ⬜ once the corpus topic is chosen |
+| `rag/chunking-notes.md` | ✅ written |
+| `demo/DEMO-SCRIPT.md` | ✅ written — corpus is movies & streaming |
 
 Upstream docs (spec snapshot, imperative/declarative API, secure-tools, OpenAI guide)
 are deliberately **not** mirrored here. The API-DELTA supersedes them for our purposes
