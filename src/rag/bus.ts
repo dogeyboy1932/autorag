@@ -6,6 +6,8 @@
  * the moment the demo needs to look alive.
  */
 
+import { invalidateLexicalIndex } from './lexical';
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
@@ -15,5 +17,7 @@ export function onCorpusChange(fn: Listener): () => void {
 }
 
 export function emitCorpusChange(): void {
+  // The BM25 index is cached across searches; any corpus change invalidates it.
+  invalidateLexicalIndex();
   for (const fn of listeners) fn();
 }

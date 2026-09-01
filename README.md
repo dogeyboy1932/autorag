@@ -37,7 +37,8 @@ and the streaming UI.
 | Layer | Choice |
 |---|---|
 | Embeddings | `transformers.js`, `Xenova/all-MiniLM-L6-v2` (384-dim), WebGPU with WASM fallback |
-| Vector store | Plain array + cosine similarity — brute force is correct under ~10k chunks |
+| Retrieval | Hybrid: cosine similarity fused 60/40 with BM25, plus typo tolerance |
+| Vector store | Plain array — brute force is correct under ~10k chunks |
 | Persistence | IndexedDB via `idb`; `Float32Array` survives structured clone unchanged |
 | Tool surface | WebMCP on `document.modelContext`, imperative **and** declarative |
 | Framework | Next.js 16, static export, everything `"use client"` |
@@ -94,6 +95,37 @@ An agent is never offered `autorag_search` against an empty index.
 
 ---
 
+## Retrieval quality
+
+Dense embeddings alone handle full questions well and ordinary typing badly. Measured
+on `bench/`, a dense-only index put the correct source first for 85% of realistic
+queries but scored eight of twenty-one *correct* retrievals below the confidence floor
+— finding the right answer and then telling the agent to distrust it.
+
+Two changes fixed it:
+
+- **Hybrid ranking.** BM25 over title-prefixed passages, fused 60/40 with cosine, with
+  edit-distance typo correction for terms of five characters or more. Bare numbers,
+  proper nouns and rating codes are exactly where dense similarity is weakest.
+- **Calibrated confidence.** An absolute cosine cutoff is wrong because similarity
+  scales with query length — "runtime" scores 0.127 against the passage that literally
+  contains the runtime. Confidence keys on how much of the query's vocabulary the
+  passage actually covers, falling back to the dense score for paraphrase.
+
+```
+                    top-1     usable verdict
+dense only          85%       —
+hybrid + calibrated 100%      100%
+```
+
+Run it yourself with `pnpm bench` against a running dev server.
+
+**What it still declines to answer, correctly.** "how long is it" scores 0.139 with the
+word "long" absent from the corpus — identical to "how do I bake sourdough", which
+scores 0.139 with a *larger* margin. The two are indistinguishable at the signal level,
+so both report low confidence. Ranking a plausible source first there would be
+coincidence at the noise floor, and reporting it as knowledge would be a lie.
+
 ## Curation
 
 Screening **nominates; it never rules.** Cosine distance can tell you two passages are
@@ -109,6 +141,11 @@ A note on ordering, because it is counter-intuitive: contradictory passages are
 contradiction. The differing-figures test has to run first.
 
 ---
+
+## New here?
+
+Read **[MANUAL.md](MANUAL.md)** — what this is, how to run it, and a ten-minute test
+plan in plain language. This README assumes you already know what WebMCP is.
 
 ## Running it
 
@@ -162,6 +199,7 @@ Chrome 151, including three findings that changed the design:
 ## Repo map
 
 ```
+bench/          retrieval benchmark (pnpm bench)
 app/            page shell
 components/     ReviewQueue (the human gate), CorpusView, ActivityLog, declarative form
 src/rag/        embed · chunk · store · search · screen · ingest

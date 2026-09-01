@@ -7,7 +7,8 @@
     "dev": "next dev -p 3111",
     "build": "next build",
     "start": "next start -p 3111",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench": "node bench/retrieval.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -22,6 +23,7 @@
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "puppeteer-core": "24.39.0",
     "typescript": "^7.0.2"
   }
 }

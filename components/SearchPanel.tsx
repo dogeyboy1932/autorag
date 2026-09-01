@@ -12,6 +12,7 @@ import { Button, Empty, Panel, Pill } from './ui';
 export default function SearchPanel() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
+  const [asked, setAsked] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function run() {
@@ -19,12 +20,13 @@ export default function SearchPanel() {
     setBusy(true);
     try {
       setResult(await search(query, { k: 5 }));
+      setAsked(query.trim());
     } finally {
       setBusy(false);
     }
   }
 
-  const confidence = result ? confidenceOf(result.hits) : null;
+  const confidence = result ? confidenceOf(result.hits, asked, result.docs) : null;
 
   return (
     <Panel
@@ -62,7 +64,7 @@ export default function SearchPanel() {
       {result && (
         <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
           <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-            {coverageNote(result.hits, result.totalCandidates)}
+            {coverageNote(result.hits, result.totalCandidates, confidence ?? 'medium', result.unmatchedTerms)}
           </span>
           {result.hits.length === 0 ? (
             <Empty>No approved chunks matched. Approve something in the review queue first.</Empty>

@@ -58,9 +58,14 @@ export interface Chunk {
 export interface SearchHit {
   chunk: Chunk;
   source: Source;
+  /** Fused relevance after any staleness demotion. This is what ranking uses. */
   score: number;
-  /** Score before staleness demotion, for `autorag_explain_retrieval`. */
+  /** Fused relevance before staleness demotion, for `autorag_explain_retrieval`. */
   rawScore: number;
+  /** Cosine similarity alone — paraphrase signal. */
+  denseScore: number;
+  /** Saturated BM25 alone — exact-term signal. */
+  lexicalScore: number;
 }
 
 /** Every list tool returns this envelope. */

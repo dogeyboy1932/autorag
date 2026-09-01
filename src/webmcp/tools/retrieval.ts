@@ -32,13 +32,14 @@ async function ensureCorpus() {
 export const searchTool = {
   name: 'autorag_search',
   description:
-    'Semantic search over approved memory. Returns ranked passages with the source each came from. Only human-approved material is searchable; staged and rejected passages are never returned.',
+    'Search the approved memory. Returns ranked passages with the source each came from. Handles full questions, loose keywords, names, numbers and small typos equally well. Only human-approved material is searchable; staged and rejected passages are never returned.',
   inputSchema: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'What to look for, in natural language. Full questions work better than keywords.',
+        description:
+          'What to look for. Anything works — a full question, a few keywords, a single name, or a bare number. Retrieval fuses semantic similarity with exact-term matching and tolerates minor misspellings, so there is no need to rewrite the user\'s wording before searching.',
       },
       k: { type: 'number', description: 'How many passages to return. Default 5, maximum 20.' },
       tags: {
@@ -124,6 +125,7 @@ export const answerWithSourcesTool = {
       const result = await search(input.question.trim(), { k });
 
       const sources = [...new Map(result.hits.map((h) => [h.source.id, h.source])).values()];
+      const confidence = confidenceOf(result.hits, input.question.trim(), result.docs);
 
       return {
         ok: true as const,
@@ -141,8 +143,13 @@ export const answerWithSourcesTool = {
           stale: s.stale,
           stale_reason: s.staleReason,
         })),
-        confidence: confidenceOf(result.hits),
-        coverage_note: coverageNote(result.hits, result.totalCandidates),
+        confidence,
+        coverage_note: coverageNote(
+          result.hits,
+          result.totalCandidates,
+          confidence,
+          result.unmatchedTerms,
+        ),
       };
     }),
 } satisfies Tool;
@@ -173,7 +180,9 @@ export const explainRetrievalTool = {
         placement: label,
         chunk_id: h.chunk.id,
         source_title: h.source.title,
-        raw_score: Number(h.rawScore.toFixed(4)),
+        dense_score: Number(h.denseScore.toFixed(4)),
+        lexical_score: Number(h.lexicalScore.toFixed(4)),
+        fused_score: Number(h.rawScore.toFixed(4)),
         final_score: Number(h.score.toFixed(4)),
         staleness_demotion_applied: h.source.stale,
         text_preview: h.chunk.text.slice(0, 160),
@@ -186,8 +195,9 @@ export const explainRetrievalTool = {
         returned: result.hits.map(explain('returned')),
         near_misses: result.nearMisses.map(explain('near_miss')),
         candidates_considered: result.totalCandidates,
+        unmatched_terms: result.unmatchedTerms,
         note:
-          'Scores are cosine similarity over 384-dimensional all-MiniLM-L6-v2 embeddings. Sources marked stale have their score multiplied by 0.6.',
+          'final_score fuses two signals: dense_score is cosine similarity over 384-dimensional all-MiniLM-L6-v2 embeddings (good at paraphrase), lexical_score is a saturated BM25 over the same passages (good at exact words, numbers and names). They are combined 60/40. Sources marked stale then have the result multiplied by 0.6.',
       };
     }),
 } satisfies Tool;
@@ -225,20 +235,33 @@ export const checkCoverageTool = {
       const empty = await ensureCorpus();
       if (empty) return empty;
 
-      const threshold = Math.min(0.99, Math.max(0.01, input.threshold ?? 0.45));
+      const threshold = Math.min(0.99, Math.max(0.01, input.threshold ?? 0.3));
       const result = await search(input.question.trim(), { k: 5 });
+      const confidence = confidenceOf(result.hits, input.question.trim(), result.docs);
       const supporting = result.hits.filter((h) => h.score >= threshold);
       const top = result.hits[0]?.score ?? 0;
 
+      /*
+       * Verdict follows calibrated confidence, not a bare score threshold. A
+       * one-word question can be fully answered by a passage it scores 0.13
+       * against, so counting passages above a fixed cutoff under-reports
+       * coverage badly on exactly the queries people type most.
+       */
       const verdict =
-        supporting.length >= 2 ? 'covered' : supporting.length === 1 ? 'partial' : 'not_covered';
+        confidence === 'high'
+          ? 'covered'
+          : confidence === 'medium' || supporting.length >= 1
+            ? 'partial'
+            : 'not_covered';
 
       return {
         ok: true as const,
         question: input.question.trim(),
         verdict,
+        confidence,
         threshold,
         top_score: Number(top.toFixed(4)),
+        unmatched_terms: result.unmatchedTerms,
         supporting_passages: supporting.map((h) => ({
           chunk_id: h.chunk.id,
           text: h.chunk.text,
