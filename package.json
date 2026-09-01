@@ -9,7 +9,10 @@
     "start": "next start -p 3111",
     "typecheck": "tsc --noEmit",
     "bench": "node bench/retrieval.mjs",
-    "loop": "node probes/webmcp-loop.mjs"
+    "loop": "node probes/webmcp-loop.mjs",
+    "ext": "node extension/build.mjs",
+    "ext:watch": "node extension/build.mjs --watch",
+    "ext:check": "node probes/extension-check.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -21,9 +24,11 @@
   },
   "devDependencies": {
     "@mcp-b/webmcp-types": "5.1.0",
+    "@types/chrome": "^0.2.8",
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "esbuild": "^0.28.2",
     "puppeteer-core": "24.39.0",
     "typescript": "^7.0.2"
   }

@@ -19,7 +19,8 @@
     "jsx": "react-jsx",
     "incremental": true,
     "types": [
-      "@mcp-b/webmcp-types"
+      "@mcp-b/webmcp-types",
+      "chrome"
     ],
     "plugins": [
       {
@@ -42,6 +43,7 @@
   "exclude": [
     "node_modules",
     "out",
-    ".next"
+    ".next",
+    "extension/dist"
   ]
 }
