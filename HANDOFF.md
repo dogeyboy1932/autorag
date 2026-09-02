@@ -18,6 +18,7 @@ They share one engine (`src/rag/`) and have different jobs. Neither is dead code
 | Role | **the product** | the deployed tool host |
 | Capture | highlight → Keep · `Ctrl+Shift+S` · whole-page preview | agent calls `autorag_ingest_passage`; manual form as fallback |
 | Tools | 4, injected into **every page you visit** | 15, on its own page, both registration APIs |
+| Agent can curate | ✗ — recall and deposit only | ✓ — queue, adjudication, staleness, deletion |
 | Corpus | extension storage, outlives every tab | IndexedDB on its own origin |
 | Reached by | a desktop MCP client, via `pnpm bridge` | any agent that can visit a URL |
 
@@ -149,22 +150,43 @@ localhost is the one context that is neither. That is `extension/connector/`.
 
 ## 6. What is left
 
-**Nobody is blocking these:**
+**App-side, in priority order:**
+
+- [ ] **Give agents the curation loop on the extension.** This is the biggest gap and it
+      breaks a headline claim. `screen.ts` runs on every extension capture and conflicts
+      are stored and shown in the panel — but no agent can see the queue or rule on
+      anything, so *"screening nominates, the agent adjudicates, the human decides"* is
+      currently true only of the web app. Needs `autorag_list_pending`,
+      `autorag_adjudicate_conflict` and `autorag_list_sources` added to
+      `extension/src/content/webmcp.ts`, plus `adjudicate` in `extension/src/protocol.ts`
+      and `offscreen/main.ts`. The engine already supports all of it
+      (`annotateConflict` in `src/rag/store.ts`); copy the schemas from
+      `src/webmcp/tools/ingestion.ts`, which are already eval-hardened.
+- [ ] Strip `page_heading`, the demo tool `@mcp-b/global` registers on every page.
+- [ ] Verify the extension corpus survives a full browser restart. Never explicitly
+      tested — `ext:check` uses a throwaway profile each run.
+- [ ] The blind-agent test (§7). Highest-value engineering left.
+
+**Docs and submission:**
 
 - [ ] Rewrite `lib/demo/DEMO-SCRIPT.md` for the extension as lead: highlight on a real
       site → conflict in the review queue → reject on camera → recall with provenance →
       the agent calling the tools through chrome-devtools-mcp.
-- [ ] `SUBMISSION.md` — extension as headline, URLs filled in.
-- [ ] Strip `page_heading`, the demo tool `@mcp-b/global` registers on every page.
-- [ ] The blind-agent test (§7). Highest-value engineering left.
+- [ ] `SUBMISSION.md` — move the extension to the headline; it currently leads with the
+      web app.
 
-**Blocked on the user** (`HUMAN-TASKS.md`):
+**Blocked on the user** (`HUMAN-TASKS.md` has the detail):
 
 - [ ] Push. `gh` is authed as `dogeyboy1932`; must be **public** for the MIT licence to
       show. `gh repo create autorag --public --source=. --remote=origin --push`
-- [ ] Deploy the web app (static export; Vercel account exists). Then
-      `pnpm loop --url <deploy>` to confirm the surface survives hosting.
+- [ ] Use the extension for ten minutes and report what still costs more than one gesture.
 - [ ] Record the video, submit on Devpost.
+
+**Deploy is NOT on the list.** It was justified solely by ChatGPT's in-app browser being
+the only shipping WebMCP consumer that can visit a URL but cannot run an extension. The
+demo agent is chrome-devtools-mcp, which reaches `localhost:3111` fine, so the deploy buys
+nothing. Revisit only if Devpost demands a live URL — unverified; `SUBMISSION.md` has a
+"Live URL" field written on that assumption.
 
 **Deferred by decision — do not "fix":** ChatGPT's in-app browser is untested and
 unclaimed; the token benchmark is cut; `find_gaps` stays out unless there is real
