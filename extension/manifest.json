@@ -65,8 +65,8 @@
   "commands": {
     "keep-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+S",
-        "mac": "Command+Shift+S"
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
       },
       "description": "Keep the highlighted text in Autorag"
     },

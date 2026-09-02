@@ -54,11 +54,16 @@ Four ways in. Try all four on real pages you were reading anyway:
 | Do this | Expect |
 |---|---|
 | Highlight text | A **Keep** button appears next to the selection; clicking it turns to "Kept" |
-| Highlight, then `Ctrl+Shift+S` | Same, without touching the mouse |
+| Highlight, then `Ctrl+Shift+K` | Same, without touching the mouse |
 | `Ctrl+Shift+E` with nothing selected | Keeps the whole article you are reading |
 | Right-click a selection → **Keep this in Autorag** | Same as the button |
 
-Shortcuts clash with other extensions sometimes; rebind at `brave://extensions/shortcuts`.
+Shortcuts clash; rebind at `brave://extensions/shortcuts`. **The panel shows the binding
+you actually have** rather than the one the manifest asked for — worth knowing, because
+Chromium drops a key it considers taken without saying a word. This bit us: `Ctrl+Shift+S`
+was the original default and Brave's own screenshot tool owns it, so that shortcut never
+existed while three documents told people to press it. `pnpm ext:check` now fails if any
+declared shortcut comes back unassigned.
 
 **Passes if:** each of the four stores something, and you never had to leave the page.
 **Tell me if:** any of them costs a second gesture, or gives you no sign it worked.
@@ -255,7 +260,7 @@ time; if one goes red, that is mine to fix.
 
 ```bash
 pnpm typecheck && pnpm build && pnpm ext
-pnpm ext:check    # the extension end to end, on real third-party pages: 18/18
+pnpm ext:check    # the extension end to end, on real third-party pages: 19/19
 pnpm ext:relay    # a real desktop MCP client reaching the memory: 6/6
 
 pnpm dev          # these two need the app running, in another terminal
@@ -310,5 +315,5 @@ failed on Brave. Both are checked now.
 |---|---|
 | Install and use the extension | `extension/README.md` |
 | Pick up the code | `HANDOFF.md` |
-| What the browser actually does | `lib/webmcp/API-DELTA.md` — 17 findings, each reproduced by running it |
+| What the browser actually does | `lib/webmcp/API-DELTA.md` — 18 findings, each reproduced by running it |
 | Why the architecture is shaped this way | `autorag-build-plan.md` AD-5, `amendments.md` A7 |

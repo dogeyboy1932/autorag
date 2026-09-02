@@ -256,6 +256,26 @@ try {
     return { stats: await send({ kind: 'stats' }), activity: await send({ kind: 'activity' }) };
   });
 
+  /*
+   * Chromium drops a suggested key it considers taken — silently: no error, no
+   * console warning, the command just comes back with an empty shortcut. Ctrl+Shift+S
+   * was refused on Brave for the whole build (Brave's own screenshot tool owns it)
+   * while the README, the panel and HUMAN-TASKS all told people to press it. Only a
+   * check can catch that class of bug, because nothing else reports it.
+   */
+  const binds = await panel.evaluate(() => chrome.commands.getAll());
+  const unbound = binds.filter((c) => c.name !== '_execute_action' && !c.shortcut);
+  log(
+    'every keyboard shortcut the manifest asks for is actually assigned',
+    unbound.length === 0,
+    unbound.length
+      ? `${unbound.map((c) => c.name).join(', ')} got no shortcut — the browser refused it`
+      : binds
+          .filter((c) => c.shortcut)
+          .map((c) => `${c.name} ${c.shortcut}`)
+          .join(', '),
+  );
+
   log(
     'the panel can report model state',
     read.stats?.ok === true && read.stats.data.model_ready === true,

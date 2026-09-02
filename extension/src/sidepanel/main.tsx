@@ -115,7 +115,30 @@ function WebmcpStatus() {
  * memory sight-unseen is how a corpus fills with navigation chrome. The preview is
  * editable: trim it to the part that mattered before it goes in.
  */
+/**
+ * The shortcuts the browser *actually* assigned, which is not necessarily the ones
+ * the manifest asked for.
+ *
+ * Chromium silently drops a suggested key it considers taken — no error, no console
+ * warning, the command simply comes back with an empty shortcut. `Ctrl+Shift+S` was
+ * refused on Brave for the whole build (its own screenshot tool owns it) while three
+ * documents cheerfully told people to press it. Reading the real binding means the
+ * panel cannot make that claim again, and says so plainly when there is none.
+ */
+function useShortcuts(): Record<string, string> {
+  const [keys, setKeys] = useState<Record<string, string>>({});
+  useEffect(() => {
+    void chrome.commands.getAll().then((cmds) => {
+      setKeys(Object.fromEntries(cmds.filter((c) => c.name && c.shortcut).map((c) => [c.name!, c.shortcut!])));
+    });
+  }, []);
+  return keys;
+}
+
+const openShortcuts = () => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+
 function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
+  const keys = useShortcuts();
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [draft, setDraft] = useState('');
@@ -204,8 +227,22 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
             </div>
             <p className="note" style={{ margin: '8px 0 0' }}>
               Or highlight text on the page and click <strong>Keep</strong> — that one is
-              instant, no preview. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> does the same
-              from the keyboard.
+              instant, no preview.{' '}
+              {keys['keep-selection'] ? (
+                <>
+                  <kbd>{keys['keep-selection']}</kbd> does the same from the keyboard.
+                </>
+              ) : (
+                <>
+                  The keyboard shortcut for this is{' '}
+                  <strong>unassigned — the browser refused it</strong>, usually because
+                  something else already owns that combination.{' '}
+                  <button className="linky" onClick={openShortcuts}>
+                    Assign one
+                  </button>
+                  .
+                </>
+              )}
             </p>
           </>
         )}

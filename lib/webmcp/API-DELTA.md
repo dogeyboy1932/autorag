@@ -481,3 +481,52 @@ confidence. 6/6.
 **The transferable part:** two constraints that each rule out the obvious design can still
 leave exactly one thing standing. It is worth writing both down precisely enough to
 intersect them, rather than concluding after the first that the feature is impossible.
+
+---
+
+## D18. Chromium silently refuses an extension's suggested shortcut
+
+Not WebMCP — MV3 — but the same failure shape as D12 and D14, and it survived the whole
+build for the same reason: **nothing reports it.**
+
+`manifest.json` asked for `Ctrl+Shift+S` for `keep-selection`. On Brave that combination
+belongs to the browser's own screenshot tool. Chromium does not warn, does not log, and
+does not fail to install the extension. It registers the command **with no shortcut at
+all** and moves on.
+
+Measured on a throwaway profile with Autorag as the only extension installed:
+
+```js
+await chrome.commands.getAll();
+// keep-page       shortcut: "Ctrl+Shift+E"
+// keep-selection  shortcut: ""          ← asked for Ctrl+Shift+S
+```
+
+Candidates tested the same way, all free on Brave 1.94 / Chromium 152:
+`Ctrl+Shift+K` ✓, `Ctrl+Shift+Y` ✓, `Alt+Shift+S` ✓. `keep-selection` moved to
+`Ctrl+Shift+K`.
+
+Two things made this expensive:
+
+1. **The symptom is a user reporting the wrong feature.** Pressing the key opened Brave's
+   screenshot box, which reads as "some other tool stole my shortcut" rather than "the
+   shortcut was never assigned." It is only distinguishable through `chrome.commands.getAll()`.
+2. **Three documents and the side panel all instructed people to press it**, and none of
+   them were wrong at the time they were written — they were wrong at the time they were
+   *installed*, on a browser nobody had checked.
+
+Guards added, both of the "make the runtime say it" kind rather than the "remember to
+check" kind:
+
+- `probes/extension-check.mjs` fails if any declared command comes back unassigned.
+- The side panel reads the real binding instead of hard-coding one, and when there is none
+  it says so and offers a button to `chrome://extensions/shortcuts`.
+
+**The transferable part:** a manifest is a request, not a fact. Anything the browser is
+free to decline needs to be read back at runtime, and the read-back belongs in a check —
+otherwise the documentation becomes the only record of an intention the product never
+fulfilled.
+
+**Untested on Chrome.** Chrome 137+ ignores `--load-extension` from the command line, and
+`--disable-features=DisableLoadExtensionCommandLineSwitch` did not restore it here, so
+every measurement above is Brave. Whether Chrome also reserves `Ctrl+Shift+S` is unknown.

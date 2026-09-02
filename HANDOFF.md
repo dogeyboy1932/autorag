@@ -16,7 +16,7 @@ They share one engine (`src/rag/`) and have different jobs. Neither is dead code
 | | **Extension** (`extension/`) | **Web app** (`app/`, `src/webmcp/`) |
 |---|---|---|
 | Role | **the product** | the deployed tool host |
-| Capture | highlight → Keep · `Ctrl+Shift+S` · whole-page preview | agent calls `autorag_ingest_passage`; manual form as fallback |
+| Capture | highlight → Keep · `Ctrl+Shift+K` · whole-page preview | agent calls `autorag_ingest_passage`; manual form as fallback |
 | Tools | 7, injected into **every page you visit** | 15, on its own page, both registration APIs |
 | Agent can curate | partly — reads the queue and adjudicates; cannot approve | ✓ — queue, adjudication, staleness, deletion |
 | Corpus | extension storage, outlives every tab | IndexedDB on its own origin |
@@ -40,7 +40,7 @@ pnpm install
 # The product
 pnpm ext                  # build the extension
 #   brave://extensions → Developer mode → Load unpacked → extension/dist
-pnpm ext:check            # 18/18 against a real Brave, throwaway profile
+pnpm ext:check            # 19/19 against a real Brave, throwaway profile
 
 # The desktop bridge
 pnpm bridge               # serves http://localhost:3210 — leave the tab open
@@ -53,7 +53,7 @@ pnpm loop                 # 15/15 through WebMCP on Brave
 ```
 
 Then read **`extension/README.md`** (install and use) → **`lib/webmcp/API-DELTA.md`**
-(17 findings, every one reproduced by running it) →
+(18 findings, every one reproduced by running it) →
 **`lib/tool-design/TOOL-CONTRACT.md`** (the web app's 15 schemas).
 
 **Browsers.** Brave 1.94.117 (Chromium 152) and Chrome 151, both verified. Native WebMCP
@@ -92,7 +92,7 @@ Every row is a command that produces the number, not an assertion.
 | Retrieval quality | `pnpm bench` | top-1 21/21 · no overclaim 3/3 · no withhold 25/25 |
 | Web app tool surface | `pnpm loop` | 15/15 on Brave; also verified on Chrome 151 |
 | Tool contract | `evals/RESULTS.md` | 11/11, five defects found and fixed by running it |
-| Extension end to end | `pnpm ext:check` | 18/18 |
+| Extension end to end | `pnpm ext:check` | 19/19 |
 | **Desktop agent** | `pnpm bridge` + `pnpm ext:relay` | **6/6** |
 | Extension origins | `node probes/extension-origin-check.mjs` | every extension context rejects; a web page works |
 
@@ -107,7 +107,7 @@ tool is reachable from the page.
 
 ## 4. The findings that shaped the design
 
-All 17 in `lib/webmcp/API-DELTA.md` with reproductions. The five that cost the most:
+All 18 in `lib/webmcp/API-DELTA.md` with reproductions. The five that cost the most:
 
 **D12 — MCP bridges forward only a `CallToolResult` envelope.** `executeTool()` from page
 script serializes anything, so bare objects tested fine while **all 15 tools returned
@@ -256,7 +256,7 @@ probes/             webmcp-loop · extension-check · relay-check · extension-o
 bench/              retrieval benchmark (pnpm bench)
 evals/              11 QA pairs + RESULTS.md (11/11, five defects found)
 
-lib/webmcp/API-DELTA.md        17 verified findings. Highest-value doc in the repo.
+lib/webmcp/API-DELTA.md        18 verified findings. Highest-value doc in the repo.
 lib/tool-design/TOOL-CONTRACT.md
 autorag-build-plan.md          AD-5 supersedes AD-3. Read §2 above first.
 amendments.md                  A7 is current.
@@ -270,7 +270,7 @@ MANUAL.md                      plain-language guide — written for the web app
 
 ```bash
 pnpm typecheck && pnpm build && pnpm ext
-pnpm ext:check                              # 18/18
+pnpm ext:check                              # 19/19
 pnpm bridge & pnpm ext:relay                # 6/6
 pnpm dev                                    # bench and loop both drive the app
 pnpm bench                                  # 21/21, 3/3, 25/25
