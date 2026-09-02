@@ -44,6 +44,7 @@ interface Conflict {
 interface Pending {
   chunk_id: string;
   text: string;
+  note: string | null;
   conflicts: Conflict[];
   source: { url: string; title: string };
 }
@@ -442,14 +443,60 @@ function Activity() {
 function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.text);
+  const [note, setNote] = useState(item.note ?? '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const dirty = draft.trim() !== item.text.trim() || note.trim() !== (item.note ?? '').trim();
+
+  /*
+   * Editing before deciding, because the review step is where you find out the
+   * capture dragged in a cookie banner or clipped a sentence in half. Saving
+   * re-embeds and re-screens on the way through — so the passage that gets
+   * approved is the passage that was screened, not the one that arrived.
+   */
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    const res = await ask({
+      kind: 'revisePending',
+      chunkId: item.chunk_id,
+      ...(draft.trim() !== item.text.trim() ? { text: draft.trim() } : {}),
+      note,
+    });
+    setSaving(false);
+    if (!res) return setErr('Could not save that. The passage needs at least 50 characters.');
+    setEditing(false);
+    onDone();
+  }
 
   return (
     <div className="card">
       <a className="src" href={item.source.url} target="_blank" rel="noreferrer">
         {item.source.title || item.source.url}
       </a>
-      <p className="text">{item.text}</p>
-      <p className="note">{words(item.text)} words</p>
+
+      {editing ? (
+        <>
+          <textarea className="preview" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <p className="note">
+            {words(draft)} words. Editing re-screens it, so the flags below may change.
+          </p>
+        </>
+      ) : (
+        <p className="text">{item.text}</p>
+      )}
+
+      <input
+        className="note-input"
+        placeholder="Add a note — why this matters, what to distrust (optional)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      {!editing && <p className="note">{words(item.text)} words</p>}
+      {err && <p className="note warn">{err}</p>}
 
       {item.conflicts.map((c, i) => (
         <div key={i} className="conflict">
@@ -474,35 +521,68 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
       ))}
 
       {rejecting ? (
-        <div className="row">
+        <>
           <input
             autoFocus
-            placeholder="Why not? (replayed if this comes back)"
+            placeholder="Why not? Optional — replayed if this comes back"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
-          <button
-            className="danger"
-            disabled={!reason.trim()}
-            onClick={async () => {
-              await ask({ kind: 'reject', chunkIds: [item.chunk_id], reason: reason.trim() });
-              onDone();
-            }}
-          >
-            Discard
-          </button>
-        </div>
+          {/*
+           * Discard is enabled with the box empty on purpose. A reason is genuinely
+           * useful — screening replays it when similar material returns — but
+           * demanding one turns throwing something away into a small essay, and the
+           * result is people leaving junk in the queue rather than writing a sentence
+           * about it. The reason is an offer, not a toll.
+           */}
+          <div className="row">
+            <button
+              className="danger"
+              onClick={async () => {
+                await ask({
+                  kind: 'reject',
+                  chunkIds: [item.chunk_id],
+                  ...(reason.trim() ? { reason: reason.trim() } : {}),
+                });
+                onDone();
+              }}
+            >
+              {reason.trim() ? 'Discard with reason' : 'Discard'}
+            </button>
+            <button onClick={() => setRejecting(false)}>Cancel</button>
+          </div>
+        </>
       ) : (
         <div className="row">
           <button
             className="primary"
+            disabled={saving}
             onClick={async () => {
+              if (dirty) await save();
               await ask({ kind: 'approve', chunkIds: [item.chunk_id] });
               onDone();
             }}
           >
-            Keep
+            {saving ? 'Saving…' : 'Keep'}
           </button>
+          {editing ? (
+            <>
+              <button onClick={save} disabled={saving || !dirty}>
+                Save edit
+              </button>
+              <button
+                onClick={() => {
+                  setDraft(item.text);
+                  setEditing(false);
+                  setErr(null);
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button onClick={() => setEditing(true)}>Edit</button>
+          )}
           <button onClick={() => setRejecting(true)}>Discard…</button>
         </div>
       )}

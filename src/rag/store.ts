@@ -161,6 +161,45 @@ export async function decideChunks(
   return changed;
 }
 
+/**
+ * Revises a staged passage before anyone decides on it.
+ *
+ * Only `pending` chunks are editable, and that is the whole safety property: an
+ * approved passage is something a person already vouched for, and letting it change
+ * underneath that decision would make approval meaningless. Rejected ones stay put
+ * too, since their text is what future screening matches against.
+ *
+ * The caller supplies the new embedding rather than this module computing one. That
+ * looks like a wart and is deliberate: `store.ts` has no model, and the alternative —
+ * writing new text beside the old vector — would leave a passage that reads one way
+ * and retrieves another. Passing them together makes the pairing impossible to
+ * forget.
+ */
+export async function revisePendingChunk(
+  id: ChunkId,
+  patch: { text?: string; embedding?: Float32Array; note?: string; conflicts?: Conflict[] },
+): Promise<Chunk | undefined> {
+  if (patch.text !== undefined && !patch.embedding) {
+    throw new Error('revisePendingChunk: new text must arrive with its new embedding.');
+  }
+  const database = await db();
+  const chunk = await database.get('chunks', id);
+  if (!chunk || chunk.status !== 'pending') return undefined;
+
+  const next: Chunk = {
+    ...chunk,
+    ...(patch.text !== undefined ? { text: patch.text, embedding: patch.embedding! } : {}),
+    ...(patch.conflicts !== undefined ? { conflicts: patch.conflicts } : {}),
+    // An empty note clears it; undefined leaves whatever is there.
+    ...(patch.note !== undefined ? (patch.note.trim() ? { note: patch.note.trim() } : {}) : {}),
+  };
+  if (patch.note !== undefined && !patch.note.trim()) delete next.note;
+
+  await database.put('chunks', next);
+  emitCorpusChange();
+  return next;
+}
+
 /** Writes an agent's adjudication verdict onto a pending chunk's conflict. */
 export async function annotateConflict(
   chunkId: ChunkId,

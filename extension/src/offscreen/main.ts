@@ -11,6 +11,7 @@
  */
 
 import { ingestPassage, dryRun } from '@/src/rag/ingest';
+import { screenChunk } from '@/src/rag/screen';
 import { search, confidenceOf, coverageNote } from '@/src/rag/search';
 import {
   allChunks,
@@ -19,13 +20,17 @@ import {
   decideChunks,
   deleteSourceCascade,
   annotateConflict,
+  revisePendingChunk,
+  getChunk,
+  getSource,
   setSourceStale,
   wipeAll,
 } from '@/src/rag/store';
-import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady } from '@/src/rag/embed';
+import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
 import '@mcp-b/global';
 import { isEnvelope, type Event, type Request, type Response } from '../protocol';
+import type { Conflict } from '@/src/types';
 
 /*
  * A ring buffer of what this document has been doing.
@@ -171,6 +176,7 @@ async function handle(request: Request): Promise<unknown> {
         .map((c) => ({
           chunk_id: c.id,
           text: c.text,
+          note: c.note ?? null,
           conflicts: c.conflicts.map((cf) => ({
             kind: cf.kind,
             detail: cf.detail,
@@ -228,6 +234,74 @@ async function handle(request: Request): Promise<unknown> {
         chunk_id: request.chunkId,
         ruling: request.ruling,
         message: 'Verdict recorded on the review queue. The human still decides whether to keep it.',
+      };
+    }
+
+    /*
+     * Editing a staged passage before deciding on it — a typo, a paragraph that
+     * dragged in a cookie banner, or a note about why it is worth keeping.
+     *
+     * Changed text is re-embedded and re-screened, not merely stored. Writing new
+     * text beside the old vector would produce a passage that reads one way and
+     * retrieves another, which is the kind of failure nothing surfaces until a
+     * search quietly stops working; and screening's verdict was about the text that
+     * used to be there, so it has to be asked again.
+     *
+     * The note is deliberately not embedded. It is a person's annotation about the
+     * passage, and folding it into the indexed text would let a remark about a
+     * passage compete with the passage itself in search results.
+     */
+    case 'revisePending': {
+      const before = await getChunk(request.chunkId);
+      if (!before) throw new Error(`No staged passage with id ${request.chunkId}.`);
+      if (before.status !== 'pending') {
+        throw new Error('Only passages still awaiting review can be edited.');
+      }
+
+      const text = request.text?.trim();
+      if (text !== undefined && text.length < 50) {
+        throw new Error(`A passage needs at least 50 characters; that one has ${text.length}.`);
+      }
+
+      let embedding: Float32Array | undefined;
+      let conflicts: Conflict[] | undefined;
+      if (text !== undefined && text !== before.text) {
+        record('working', 'Re-reading an edited passage');
+        embedding = await embedOne(text);
+        const source = await getSource(before.sourceId);
+        if (source) {
+          const [chunks, sources] = await Promise.all([allChunks(), allSources()]);
+          const byId = new Map(sources.map((x) => [x.id, x]));
+          const candidates = chunks
+            // Never screen a passage against itself; it would flag as a duplicate
+            // of the very thing being edited.
+            .filter((c) => c.id !== before.id)
+            .map((chunk) => ({ chunk, source: byId.get(chunk.sourceId) }))
+            .filter((c): c is { chunk: typeof before; source: NonNullable<typeof source> } =>
+              Boolean(c.source),
+            );
+          conflicts = screenChunk({ text, embedding, source }, candidates);
+        }
+      }
+
+      const updated = await revisePendingChunk(request.chunkId, {
+        ...(text !== undefined ? { text, embedding } : {}),
+        ...(request.note !== undefined ? { note: request.note } : {}),
+        ...(conflicts !== undefined ? { conflicts } : {}),
+      });
+      if (!updated) throw new Error('That passage is no longer editable.');
+
+      record(
+        'done',
+        text !== undefined && text !== before.text
+          ? `Revised a staged passage · re-screened, ${updated.conflicts.length} flag(s)`
+          : 'Saved a note on a staged passage',
+      );
+      return {
+        chunk_id: updated.id,
+        text: updated.text,
+        note: updated.note ?? null,
+        conflicts: updated.conflicts,
       };
     }
 

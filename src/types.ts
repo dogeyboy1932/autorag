@@ -52,6 +52,13 @@ export interface Chunk {
   decidedAt?: string;
   /** Retained on rejection and surfaced in future conflict checks. */
   rejectionReason?: string;
+  /**
+   * A person's own words about this passage, added while reviewing it — why it
+   * matters, what to distrust, what it is really about. Never embedded: it is
+   * annotation, not indexed material, and embedding it would let a note about a
+   * passage compete with the passage in search. Travels with every hit.
+   */
+  note?: string;
 }
 
 /** A scored retrieval hit, always carrying provenance. */

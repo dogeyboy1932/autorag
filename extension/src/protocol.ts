@@ -23,6 +23,7 @@ export type Request =
   | { kind: 'answer'; question: string }
   | { kind: 'stats' }
   | { kind: 'listPending' }
+  | { kind: 'revisePending'; chunkId: string; text?: string; note?: string }
   | {
       kind: 'adjudicate';
       chunkId: string;
@@ -32,7 +33,8 @@ export type Request =
     }
   | { kind: 'listSources' }
   | { kind: 'approve'; chunkIds: string[] }
-  | { kind: 'reject'; chunkIds: string[]; reason: string }
+  /** `reason` is optional: a person may discard without justifying it. */
+  | { kind: 'reject'; chunkIds: string[]; reason?: string }
   | { kind: 'markStale'; sourceId: string; stale: boolean; reason?: string }
   | { kind: 'forget'; sourceId: string }
   | { kind: 'wipe' }

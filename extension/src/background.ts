@@ -86,6 +86,14 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Keep this in Autorag',
     contexts: ['selection'],
   });
+  chrome.contextMenus.create({
+    id: 'autorag-keep-image',
+    // Named for what it actually stores. Autorag indexes text, so an image is kept
+    // by its caption, alt text and surrounding paragraph, with the image URL as
+    // provenance — promising "keep this image" would promise search that cannot work.
+    title: 'Keep this image’s description in Autorag',
+    contexts: ['image'],
+  });
   void ensureOffscreen();
   void injectIntoOpenTabs();
 });
@@ -97,8 +105,16 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'autorag-keep' || !tab?.id) return;
-  void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
+  if (!tab?.id) return;
+  if (info.menuItemId === 'autorag-keep') {
+    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
+  }
+  if (info.menuItemId === 'autorag-keep-image' && info.srcUrl) {
+    void chrome.tabs.sendMessage(tab.id, {
+      type: 'autorag:capture-image',
+      srcUrl: info.srcUrl,
+    });
+  }
 });
 
 /*

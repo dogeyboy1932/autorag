@@ -209,6 +209,110 @@ async function keep(text: string, what: string) {
 }
 
 /**
+ * Everything the page says *about* an image, gathered into a passage.
+ *
+ * Autorag indexes text — the embedding model is all-MiniLM-L6-v2, which has never
+ * seen a pixel — so an image is kept the only way it can honestly be kept: by its
+ * description, with the image URL as its provenance. That is a real limit and it is
+ * better stated than disguised. An uncaptioned image genuinely cannot be found
+ * later, and this returns null rather than storing a URL that no search will ever
+ * match.
+ *
+ * Sources are checked nearest-first, because a figcaption is about *this* image
+ * while the page title is about the whole article.
+ */
+function describeImage(img: HTMLImageElement): { text: string; title: string } | null {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const add = (label: string, value: string | null | undefined) => {
+    const v = value?.trim().replace(/\s+/g, ' ');
+    if (!v || v.length < 3 || seen.has(v.toLowerCase())) return;
+    seen.add(v.toLowerCase());
+    parts.push(`${label}: ${v}`);
+  };
+
+  add('Alt text', img.getAttribute('alt'));
+  add('Caption', img.closest('figure')?.querySelector('figcaption')?.textContent);
+  add('Title', img.getAttribute('title'));
+  add('Link text', img.closest('a')?.getAttribute('aria-label'));
+
+  /*
+   * Everything above is *about this image*. Nothing below is, so nothing below may
+   * be the only reason to keep it.
+   *
+   * Surrounding prose is enrichment and a decent tiebreaker, but on its own it
+   * describes the page, not the picture — a 1px spacer in the body would inherit
+   * the article's opening paragraphs and be stored as though someone had captioned
+   * it. A check caught exactly that. So: a direct descriptor is required, and the
+   * neighbourhood is only searched when the image sits in a container tighter than
+   * the whole document.
+   */
+  const direct = parts.length;
+
+  const nearby = img.closest('figure')?.parentElement ?? img.parentElement;
+  const looseContainer =
+    !nearby || nearby === document.body || nearby.tagName === 'MAIN' || nearby.tagName === 'ARTICLE';
+  if (direct > 0 && !looseContainer) {
+    const context = Array.from(nearby.querySelectorAll('p, h1, h2, h3, li'))
+      .map((n) => n.textContent?.trim() ?? '')
+      .filter((t) => t.length > 20)
+      .slice(0, 2)
+      .join(' ');
+    add('Nearby text', context);
+  }
+
+  // A described image is worth keeping; a bare URL is not. The floor is a direct
+  // descriptor, not the boilerplate appended below.
+  if (direct === 0) return null;
+
+  const title =
+    img.getAttribute('alt')?.trim() ||
+    img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() ||
+    `Image from ${document.title || location.hostname}`;
+
+  parts.push(`Image URL: ${img.currentSrc || img.src}`);
+  parts.push(`Seen on: ${document.title || location.hostname} — ${location.href}`);
+
+  return { text: parts.join('\n'), title: title.slice(0, 120) };
+}
+
+/**
+ * Keeps an image by what the page says about it. `srcUrl` comes from the context
+ * menu, which reports the URL the person right-clicked.
+ */
+async function keepImage(srcUrl: string) {
+  const img =
+    Array.from(document.images).find((i) => i.currentSrc === srcUrl || i.src === srcUrl) ?? null;
+  if (!img) {
+    toast('Could not find that image on the page.', 'bad');
+    return;
+  }
+  const described = describeImage(img);
+  if (!described) {
+    toast('This image has no caption or alt text — nothing to search on.', 'warn');
+    return;
+  }
+
+  toast('Keeping the image description…', 'warn');
+  const res = await chrome.runtime.sendMessage(
+    envelope('worker', {
+      kind: 'ingest',
+      text: described.text,
+      // The image is its own source, so keeping it twice from two pages
+      // deduplicates, and recall hands back a URL that opens the picture itself.
+      sourceUrl: img.currentSrc || img.src,
+      title: described.title,
+      tags: ['image', location.hostname.replace(/^www\./, '')],
+    }),
+  );
+  if (res?.ok) {
+    toast('Kept the description · add detail in the review queue');
+  } else {
+    toast(String(res?.error ?? 'Failed to keep the image'), 'bad');
+  }
+}
+
+/**
  * The readable body of the page, for "keep what I am reading" when nothing is
  * highlighted. Deliberately crude — <article> or <main> if the page has one,
  * otherwise the body with the furniture stripped. A perfect extractor is a
@@ -237,6 +341,10 @@ function readablePageText(): string {
  * a memory sight-unseen.
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'autorag:capture-image') {
+    void keepImage(String(message.srcUrl ?? ''));
+    return;
+  }
   if (message?.type === 'autorag:capture-selection') {
     void keep(window.getSelection()?.toString() ?? '', 'your selection');
     return;

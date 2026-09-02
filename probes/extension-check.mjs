@@ -289,6 +289,34 @@ try {
     feed.length ? `${feed.length} events, latest: "${feed[0].message}"` : 'no events',
   );
 
+  /*
+   * A side panel is resized by the person, constantly, and it is narrow to begin
+   * with. Sideways scrolling there is not cosmetic — it hides the buttons.
+   *
+   * The cause is never the layout: it is one unbroken token, almost always a URL
+   * inside a captured passage, which cannot wrap and so sets a min-content width of
+   * its own length. Measured before the fix: every card sat at 607px however narrow
+   * the panel got. This asserts the fix at widths a person can actually drag to.
+   */
+  const widths = {};
+  for (const w of [420, 340, 280]) {
+    await panel.setViewport({ width: w, height: 900 });
+    await new Promise((r) => setTimeout(r, 300));
+    widths[w] = await panel.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+  }
+  await panel.setViewport({ width: 800, height: 900 });
+  const overflowing = Object.entries(widths).filter(([, v]) => v.scroll > v.client + 1);
+  log(
+    'the panel fits its width instead of scrolling sideways',
+    overflowing.length === 0,
+    overflowing.length
+      ? overflowing.map(([w, v]) => `${w}px: content ${v.scroll} > panel ${v.client}`).join('; ')
+      : Object.entries(widths).map(([w, v]) => `${w}→${v.scroll}`).join(', '),
+  );
+
   // Preview and WebMCP status both target "the tab you are looking at". Addressed
   // here by explicit id, since the panel is itself the active tab under puppeteer.
   const pageTargetId = await page.evaluate(() => document.title);
@@ -343,6 +371,153 @@ try {
     'keep → approve → recall returns the passage with its source',
     loop.hits > 0 && !!loop.cites,
     loop.error ?? `${loop.hits} passage(s), confidence ${loop.confidence}, cites ${loop.cites}`,
+  );
+
+  /*
+   * Keeping an image. Autorag indexes text, so what is stored is the page's own
+   * description of the picture with the image URL as provenance — and the check has
+   * to prove both halves of that bargain: a described image becomes findable *by its
+   * description*, and an undescribed one is refused rather than stored as a URL no
+   * search can ever match. The second half is the honest one.
+   */
+  const images = await page.evaluate(() => {
+    const described = document.createElement('img');
+    described.src = 'https://example.com/chart.png';
+    described.alt = 'Quarterly rainfall in Reykjavik, millimetres per month';
+    const fig = document.createElement('figure');
+    fig.appendChild(described);
+    const cap = document.createElement('figcaption');
+    cap.textContent = 'Rainfall peaks sharply in October and stays high through winter.';
+    fig.appendChild(cap);
+    document.body.appendChild(fig);
+
+    const bare = document.createElement('img');
+    bare.src = 'https://example.com/spacer.gif';
+    document.body.appendChild(bare);
+    return true;
+  });
+  void images;
+  await page.evaluate(() => {
+    chrome.runtime.onMessage.addListener(() => {});
+  }).catch(() => {});
+
+  const imageKeep = await panel.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://example.com/*' });
+    const id = tabs[0]?.id;
+    if (!id) return { error: 'no example.com tab' };
+    // Exactly what the context-menu handler sends.
+    await chrome.tabs.sendMessage(id, {
+      type: 'autorag:capture-image',
+      srcUrl: 'https://example.com/chart.png',
+    });
+    await new Promise((r) => setTimeout(r, 4000));
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'i', request: req }, res),
+      );
+    const staged = ((await send({ kind: 'listPending' })).data ?? []).find((p) =>
+      p.text.includes('Reykjavik'),
+    );
+    if (staged) await send({ kind: 'approve', chunkIds: [staged.chunk_id] });
+    const found = (await send({ kind: 'answer', question: 'When is rainfall highest in Reykjavik?' })).data;
+
+    // And the undescribed one, which must be refused.
+    await chrome.tabs.sendMessage(id, {
+      type: 'autorag:capture-image',
+      srcUrl: 'https://example.com/spacer.gif',
+    });
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = (await send({ kind: 'listPending' })).data ?? [];
+    return {
+      stagedText: staged?.text ?? null,
+      hits: found?.hits?.length ?? 0,
+      cites: found?.hits?.[0]?.source?.url ?? null,
+      bareStored: after.some((p) => p.text.includes('spacer.gif')),
+    };
+  });
+  log(
+    'an image is kept by its description, and cites the image itself',
+    !!imageKeep.stagedText?.includes('Rainfall peaks') && imageKeep.hits > 0 &&
+      imageKeep.cites === 'https://example.com/chart.png',
+    imageKeep.error ?? `recall found it via the caption; cites ${imageKeep.cites}`,
+  );
+  log(
+    'an image with nothing said about it is refused, not stored as a bare URL',
+    imageKeep.bareStored === false,
+    imageKeep.bareStored ? 'a URL with no description reached the queue' : 'nothing staged for it',
+  );
+
+  /*
+   * Revising a staged passage before deciding on it. The assertion that matters is
+   * not that the text changed — it is that the *embedding* changed with it. Storing
+   * new text beside the old vector produces a passage that reads one way and
+   * retrieves another, and nothing surfaces that until a search quietly stops
+   * working. So: edit a staged passage to say something entirely different, then
+   * search for the new wording and require it back.
+   */
+  const revised = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'e', request: req }, res),
+      );
+    await send({
+      kind: 'ingest',
+      text: 'A passage about tidal turbine maintenance schedules in the North Sea, kept so it can be edited.',
+      sourceUrl: 'https://example.com/editable',
+      title: 'Editable',
+    });
+    const staged = ((await send({ kind: 'listPending' })).data ?? []).find((p) =>
+      p.text.includes('tidal turbine'),
+    );
+    if (!staged) return { error: 'nothing staged to edit' };
+
+    const out = await send({
+      kind: 'revisePending',
+      chunkId: staged.chunk_id,
+      text: 'Espresso extraction time for a double shot is twenty five to thirty seconds at nine bars of pressure.',
+      note: 'Checked against the roaster guide.',
+    });
+    await send({ kind: 'approve', chunkIds: [staged.chunk_id] });
+    const found = (await send({ kind: 'answer', question: 'How long should an espresso shot take?' })).data;
+    return {
+      ok: out?.ok,
+      note: out?.data?.note,
+      hit: found?.hits?.[0]?.chunk?.text ?? '',
+      keptNote: found?.hits?.[0]?.chunk?.note ?? null,
+    };
+  });
+  log(
+    'an edited passage is re-embedded, not just re-worded',
+    revised.ok === true && revised.hit.includes('Espresso') && revised.note === 'Checked against the roaster guide.',
+    revised.error ?? `search for the new wording returns it; note "${revised.keptNote}" travels with the hit`,
+  );
+
+  // Discarding without writing an essay about it.
+  const bareDiscard = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'd', request: req }, res),
+      );
+    await send({
+      kind: 'ingest',
+      text: 'A thoroughly unremarkable paragraph that exists only to be thrown away without explanation.',
+      sourceUrl: 'https://example.com/junk',
+      title: 'Junk',
+    });
+    const staged = ((await send({ kind: 'listPending' })).data ?? []).find((p) =>
+      p.text.includes('unremarkable'),
+    );
+    if (!staged) return { error: 'nothing staged to discard' };
+    const out = await send({ kind: 'reject', chunkIds: [staged.chunk_id] });
+    const left = ((await send({ kind: 'listPending' })).data ?? []).some(
+      (p) => p.chunk_id === staged.chunk_id,
+    );
+    return { rejected: out?.data?.rejected?.length ?? 0, stillPending: left };
+  });
+  log(
+    'something can be discarded without giving a reason',
+    bareDiscard.rejected === 1 && bareDiscard.stillPending === false,
+    bareDiscard.error ?? 'discarded with an empty reason; it left the queue',
   );
 
   /*

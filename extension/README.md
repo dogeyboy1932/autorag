@@ -40,6 +40,10 @@ nothing ever leaves your machine.
 **Keep a passage.** Highlight text on any page. A **Keep** button appears next to
 your selection. Click it. Done — it is captured and waiting in your review queue.
 
+**Images.** Right-click one and choose *Keep this image's description*. Autorag indexes
+text, so what is stored is the caption, alt text and surrounding paragraph, with the image
+URL as its source; an image nothing is said about is refused rather than stored unfindable.
+
 **Without the mouse.** `Ctrl+Shift+K` keeps whatever is highlighted.
 `Ctrl+Shift+E` keeps the whole article you are reading, no selection needed.
 Change either at `brave://extensions/shortcuts`.
@@ -104,7 +108,7 @@ and it is WebMCP doing it.
 pnpm ext:check
 ```
 
-Nineteen assertions against a real browser with a throwaway profile: a third-party
+Twenty-four assertions against a real browser with a throwaway profile: a third-party
 page gains a WebMCP surface, the seven tools appear on it, a tool call reaches the
 corpus, highlighting offers to keep in place, an agent can deposit, **clicking Keep on
 a highlight actually stores it**, the memory answers from an unrelated site, an agent

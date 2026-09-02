@@ -5,10 +5,20 @@
   --ok: #3fb950; --warn: #d29922; --bad: #f85149;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg);
+/*
+ * `overflow-wrap` is inherited, so this one declaration is what stops the panel
+ * scrolling sideways. The cause is never the layout — it is a single unbroken
+ * token, almost always a URL in a captured passage: it cannot wrap, so it sets a
+ * min-content width of its own length and every ancestor stretches to hold it.
+ * Measured before the fix: a 100-character URL made every card 607px wide no
+ * matter how narrow the panel got.
+ */
+body { margin: 0; background: var(--bg); color: var(--fg); overflow-wrap: anywhere;
   font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
-.app { padding: 12px; display: grid; gap: 18px; }
-header { display: flex; align-items: baseline; justify-content: space-between; }
+.app { padding: 12px; display: grid; gap: 18px; min-width: 0; }
+section, .card { min-width: 0; }
+header { display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 4px 8px; }
 h1 { font-size: 15px; margin: 0; letter-spacing: -0.01em; }
 h2 { font-size: 12px; margin: 0 0 8px; color: var(--muted);
   text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
@@ -33,7 +43,8 @@ h2 { font-size: 12px; margin: 0 0 8px; color: var(--muted);
 .conf-low { border-color: var(--muted); color: var(--muted); }
 .pill { background: var(--accent); color: #fff; border-radius: 999px;
   padding: 0 6px; font-size: 10.5px; margin-left: 4px; }
-.row { display: flex; gap: 6px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; }
+.row > button { flex: 0 1 auto; }
 input { flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
 button { background: var(--panel); color: var(--fg); border: 1px solid var(--border);
@@ -54,6 +65,7 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .chip.ok { border-color: var(--ok); color: var(--ok); }
 .chip.warn { border-color: var(--warn); color: var(--warn); }
 .chip.bad { border-color: var(--bad); color: var(--bad); }
+.note-input { width: 100%; margin-bottom: 6px; }
 .preview { width: 100%; min-height: 150px; max-height: 320px; resize: vertical;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, monospace;

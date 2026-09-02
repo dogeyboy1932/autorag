@@ -63,6 +63,7 @@ Four ways in. Try all four on real pages you were reading anyway:
 | Highlight, then `Ctrl+Shift+K` | Same, without touching the mouse |
 | `Ctrl+Shift+E` with nothing selected | Keeps the whole article you are reading |
 | Right-click a selection → **Keep this in Autorag** | Same as the button |
+| Right-click an image → **Keep this image's description** | Stores the caption/alt text with the image URL — see §2b |
 
 Shortcuts clash; rebind at `brave://extensions/shortcuts`. **The panel shows the binding
 you actually have** rather than the one the manifest asked for — worth knowing, because
@@ -78,6 +79,23 @@ box and press your key. Assigning by hand always wins over the manifest's sugges
 
 **Passes if:** each of the four stores something, and you never had to leave the page.
 **Tell me if:** any of them costs a second gesture, or gives you no sign it worked.
+
+### 2b. Images are kept by their description, not their pixels
+
+*Meant to:* be honest about a hard limit. Autorag indexes text — the embedding model
+has never seen a pixel — so an image is stored as whatever the page says *about* it
+(alt text, caption, title, the paragraph beside it) with the image URL as its source.
+
+Right-click an image with a caption and choose **Keep this image's description**. Then
+right-click a decorative one — a logo, a spacer, an icon with no alt text.
+
+**Passes if:** the captioned one lands in the queue as its description and is findable
+later by searching that description, and recall hands back the image's own URL. The
+undescribed one is **refused**, with a toast saying there is nothing to search on.
+**Expected, not broken:** an uncaptioned screenshot cannot be kept. Storing a URL that
+no search could ever match would be a filing cabinet that swallows things.
+**Tell me if:** you want real image search. That needs a second, multimodal model
+(CLIP or SigLIP) and roughly doubles the install — a different decision, not a tweak.
 
 ### 2. Whole-page capture shows you what it got, first
 
@@ -100,8 +118,20 @@ and I want to know which real pages defeat it.
 
 Keep three or four things, then open **To review**. Approve some, discard others.
 
-**Passes if:** approved passages become findable in **Recall** and discarded ones never do.
-Check the counts in the header move the way you expect.
+Then use the other three controls on a card:
+
+- **Edit** — fix a capture that clipped a sentence or dragged in a cookie banner. Saving
+  re-embeds *and* re-screens, so the passage that gets approved is the passage that was
+  screened. The flags underneath may change when you save; that is correct, not a glitch.
+- **The note field** — your own words about the passage: why it matters, what to distrust.
+  It travels with the passage into every future search result. It is deliberately **not**
+  indexed, so a note about a passage never competes with the passage itself in search.
+- **Discard** — with or without a reason. The box is optional now: a reason is genuinely
+  useful (screening replays it if similar material returns) but it is an offer, not a toll.
+
+**Passes if:** approved passages become findable in **Recall** and discarded ones never do;
+an edited passage is findable by its *new* wording and not its old; and Discard works with
+the reason box left empty.
 **Tell me if:** anything shows up in Recall that you did not approve. That is the one
 invariant the whole design rests on.
 
@@ -190,6 +220,17 @@ Then **Forget** a different one.
 the forgotten one is gone entirely, and forgetting asked you twice.
 **Tell me if:** a stale source outranks a fresh one on the same subject.
 
+### 9b. The panel fits whatever width you drag it to
+
+*Meant to:* survive being narrow, which a side panel always is.
+
+Drag the panel edge in as far as it goes.
+
+**Passes if:** everything reflows — no sideways scrolling, no buttons pushed out of reach.
+Checked automatically at 420, 340 and 280px.
+**Tell me if:** any width scrolls sideways. The cause is almost always one unbroken token
+(a URL in a captured passage) that cannot wrap, and it is a one-line fix each time.
+
 ### 10. It says what it is doing
 
 *Meant to:* stop an empty corpus and a slow model looking identical to a broken extension.
@@ -271,7 +312,7 @@ time; if one goes red, that is mine to fix.
 
 ```bash
 pnpm typecheck && pnpm build && pnpm ext
-pnpm ext:check    # the extension end to end, on real third-party pages: 19/19
+pnpm ext:check    # the extension end to end, on real third-party pages: 24/24
 pnpm ext:relay    # a real desktop MCP client reaching the memory: 6/6
 
 pnpm dev          # these two need the app running, in another terminal
@@ -310,6 +351,7 @@ failed on Brave. Both are checked now.
 
 | | |
 |---|---|
+| Images are searchable only by their description | The engine is text-only. An uncaptioned image is refused rather than stored unfindable. |
 | Whole-page extraction is crude | `<article>`, else `<main>`, else body minus nav/header/footer. Beats selecting 2,000 words; not a Readability implementation. |
 | Screening misses some real conflicts | It nominates, you rule. One measured miss scored 0.659 against a 0.72 threshold. |
 | Screening over-flags | On purpose. An agent triaging first (§6) is what makes that affordable. |

@@ -40,7 +40,7 @@ pnpm install
 # The product
 pnpm ext                  # build the extension
 #   brave://extensions → Developer mode → Load unpacked → extension/dist
-pnpm ext:check            # 19/19 against a real Brave, throwaway profile
+pnpm ext:check            # 24/24 against a real Brave, throwaway profile
 
 # The desktop bridge
 pnpm bridge               # serves http://localhost:3210 — leave the tab open
@@ -92,7 +92,7 @@ Every row is a command that produces the number, not an assertion.
 | Retrieval quality | `pnpm bench` | top-1 21/21 · no overclaim 3/3 · no withhold 25/25 |
 | Web app tool surface | `pnpm loop` | 15/15 on Brave; also verified on Chrome 151 |
 | Tool contract | `evals/RESULTS.md` | 11/11, five defects found and fixed by running it |
-| Extension end to end | `pnpm ext:check` | 19/19 |
+| Extension end to end | `pnpm ext:check` | 24/24 |
 | **Desktop agent** | `pnpm bridge` + `pnpm ext:relay` | **6/6** |
 | Extension origins | `node probes/extension-origin-check.mjs` | every extension context rejects; a web page works |
 
@@ -270,7 +270,7 @@ MANUAL.md                      plain-language guide — written for the web app
 
 ```bash
 pnpm typecheck && pnpm build && pnpm ext
-pnpm ext:check                              # 19/19
+pnpm ext:check                              # 24/24
 pnpm bridge & pnpm ext:relay                # 6/6
 pnpm dev                                    # bench and loop both drive the app
 pnpm bench                                  # 21/21, 3/3, 25/25
