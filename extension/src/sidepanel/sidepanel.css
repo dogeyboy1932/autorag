@@ -66,6 +66,12 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .chip.warn { border-color: var(--warn); color: var(--warn); }
 .chip.bad { border-color: var(--bad); color: var(--bad); }
 .note-input { width: 100%; margin-bottom: 6px; }
+/* The picture, so a person describing an image is looking at it rather than
+   remembering it. Errors are hidden by the handler: a hotlink-blocked image
+   should not leave a broken-icon hole in the review card. */
+.thumb { display: block; max-width: 100%; max-height: 140px; border-radius: 6px;
+  border: 1px solid var(--border); margin-bottom: 8px; object-fit: contain; }
+.needs-desc { border-left: 2px solid var(--warn); padding-left: 8px; }
 .preview { width: 100%; min-height: 150px; max-height: 320px; resize: vertical;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, monospace;

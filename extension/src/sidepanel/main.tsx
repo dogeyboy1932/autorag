@@ -23,6 +23,7 @@ import {
   type Event,
   type Preview,
   type Request,
+  NEEDS_DESCRIPTION,
 } from '../protocol';
 
 async function ask<T>(request: Request): Promise<T | null> {
@@ -46,7 +47,7 @@ interface Pending {
   text: string;
   note: string | null;
   conflicts: Conflict[];
-  source: { url: string; title: string };
+  source: { url: string; title: string; tags: string[] };
 }
 
 /** How an agent's ruling reads to the person who has to act on it. */
@@ -452,6 +453,21 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
   const dirty = draft.trim() !== item.text.trim() || note.trim() !== (item.note ?? '').trim();
 
   /*
+   * An image the page said nothing about. It is staged rather than refused — most of
+   * the web captions nothing, and refusing turned away screenshots and charts while
+   * waving through any logo with a dutiful alt attribute. What it cannot do is enter
+   * the memory undescribed, because nothing would ever retrieve it: the index is
+   * text, and its only text would be a URL.
+   *
+   * So the queue shows the picture and holds the Keep button until a person has
+   * written what it is. Steering, not security (amendments A1, A4) — the sentinel is
+   * in the text they are editing and they can delete it. The point is that keeping it
+   * blind takes a deliberate act, not an accidental click.
+   */
+  const isImage = item.source.tags?.includes('image');
+  const undescribed = draft.includes(NEEDS_DESCRIPTION);
+
+  /*
    * Editing before deciding, because the review step is where you find out the
    * capture dragged in a cookie banner or clipped a sentence in half. Saving
    * re-embeds and re-screens on the way through — so the passage that gets
@@ -478,7 +494,22 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
         {item.source.title || item.source.url}
       </a>
 
-      {editing ? (
+      {isImage && (
+        <img
+          className="thumb"
+          src={item.source.url}
+          alt=""
+          onError={(e) => (e.currentTarget.style.display = 'none')}
+        />
+      )}
+      {undescribed && (
+        <p className="note warn needs-desc">
+          The page said nothing about this image. Describe what it shows — otherwise
+          nothing will ever find it, because the index is text.
+        </p>
+      )}
+
+      {editing || undescribed ? (
         <>
           <textarea className="preview" value={draft} onChange={(e) => setDraft(e.target.value)} />
           <p className="note">
@@ -556,16 +587,17 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
         <div className="row">
           <button
             className="primary"
-            disabled={saving}
+            disabled={saving || undescribed}
+            title={undescribed ? 'Describe the image first — nothing could find it otherwise.' : undefined}
             onClick={async () => {
               if (dirty) await save();
               await ask({ kind: 'approve', chunkIds: [item.chunk_id] });
               onDone();
             }}
           >
-            {saving ? 'Saving…' : 'Keep'}
+            {saving ? 'Saving…' : undescribed ? 'Describe it first' : 'Keep'}
           </button>
-          {editing ? (
+          {editing && !undescribed ? (
             <>
               <button onClick={save} disabled={saving || !dirty}>
                 Save edit
@@ -580,6 +612,10 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
                 Cancel
               </button>
             </>
+          ) : undescribed ? (
+            <button onClick={save} disabled={saving || !dirty}>
+              Save description
+            </button>
           ) : (
             <button onClick={() => setEditing(true)}>Edit</button>
           )}

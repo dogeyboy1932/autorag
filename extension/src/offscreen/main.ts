@@ -202,6 +202,7 @@ async function handle(request: Request): Promise<unknown> {
           source: {
             url: byId.get(c.sourceId)?.url ?? '',
             title: byId.get(c.sourceId)?.title ?? '',
+            tags: byId.get(c.sourceId)?.tags ?? [],
           },
         }));
     }

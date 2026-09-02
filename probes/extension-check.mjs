@@ -421,18 +421,22 @@ try {
     if (staged) await send({ kind: 'approve', chunkIds: [staged.chunk_id] });
     const found = (await send({ kind: 'answer', question: 'When is rainfall highest in Reykjavik?' })).data;
 
-    // And the undescribed one, which must be refused.
+    // And the undescribed one, which is staged for a person to describe rather
+    // than refused — but must not be approvable while it says nothing.
     await chrome.tabs.sendMessage(id, {
       type: 'autorag:capture-image',
       srcUrl: 'https://example.com/spacer.gif',
     });
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, 3000));
     const after = (await send({ kind: 'listPending' })).data ?? [];
+    const bare = after.find((p) => p.text.includes('spacer.gif'));
     return {
       stagedText: staged?.text ?? null,
       hits: found?.hits?.length ?? 0,
       cites: found?.hits?.[0]?.source?.url ?? null,
-      bareStored: after.some((p) => p.text.includes('spacer.gif')),
+      bareStaged: !!bare,
+      bareFlagged: !!bare?.text.includes('NEEDS A DESCRIPTION'),
+      bareTags: bare?.source?.tags ?? [],
     };
   });
   log(
@@ -442,9 +446,35 @@ try {
     imageKeep.error ?? `recall found it via the caption; cites ${imageKeep.cites}`,
   );
   log(
-    'an image with nothing said about it is refused, not stored as a bare URL',
-    imageKeep.bareStored === false,
-    imageKeep.bareStored ? 'a URL with no description reached the queue' : 'nothing staged for it',
+    'an image the page says nothing about waits for you to describe it',
+    imageKeep.bareStaged === true &&
+      imageKeep.bareFlagged === true &&
+      imageKeep.bareTags.includes('needs-description'),
+    imageKeep.bareStaged
+      ? `staged and marked: tags ${imageKeep.bareTags.join('/')}`
+      : 'the undescribed image was dropped instead of queued',
+  );
+
+  /*
+   * And the half that keeps that from becoming a junk drawer: the panel must refuse
+   * to approve it while it still says nothing. Asserted on the rendered button,
+   * because the rule only exists where the person actually is.
+   */
+  await panel.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 2000));
+  const gate = await panel.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('.card'));
+    const card = cards.find((c) => c.querySelector('.needs-desc'));
+    if (!card) return { found: false };
+    const keep = Array.from(card.querySelectorAll('button')).find((b) =>
+      /Describe it first|Keep/.test(b.textContent ?? ''),
+    );
+    return { found: true, label: keep?.textContent ?? '', disabled: !!keep?.disabled };
+  });
+  log(
+    'the panel will not let an undescribed image be kept',
+    gate.found === true && gate.disabled === true,
+    gate.found ? `button reads "${gate.label}", disabled=${gate.disabled}` : 'no undescribed card rendered',
   );
 
   /*

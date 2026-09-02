@@ -63,6 +63,16 @@ export function isEnvelope(value: unknown): value is Envelope {
 export const PAGE_REQUEST = 'autorag:page-request';
 export const PAGE_RESPONSE = 'autorag:page-response';
 
+/**
+ * Marks a staged passage that a person still has to write. Only images use it: the
+ * web mostly says nothing about its pictures, so an undescribed one is kept anyway
+ * and the review queue refuses to approve it until this line is gone. Written by the
+ * content script, read by the panel, and deliberately a visible English sentence —
+ * it sits in the passage a person is editing, so it has to read like an instruction
+ * rather than a token that leaked out of the code.
+ */
+export const NEEDS_DESCRIPTION = 'NEEDS A DESCRIPTION — say what this image shows, then keep it.';
+
 /** Panel → content script: what *would* be captured, without capturing it. */
 export const PREVIEW_PAGE = 'autorag:preview-page';
 export const PREVIEW_SELECTION = 'autorag:preview-selection';

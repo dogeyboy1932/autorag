@@ -12,6 +12,7 @@
  */
 
 import {
+  NEEDS_DESCRIPTION,
   PAGE_REQUEST,
   PAGE_RESPONSE,
   PREVIEW_PAGE,
@@ -221,7 +222,9 @@ async function keep(text: string, what: string) {
  * Sources are checked nearest-first, because a figcaption is about *this* image
  * while the page title is about the whole article.
  */
-function describeImage(img: HTMLImageElement): { text: string; title: string } | null {
+function describeImage(
+  img: HTMLImageElement,
+): { text: string; title: string; described: boolean } {
   const parts: string[] = [];
   const seen = new Set<string>();
   const add = (label: string, value: string | null | undefined) => {
@@ -238,14 +241,13 @@ function describeImage(img: HTMLImageElement): { text: string; title: string } |
 
   /*
    * Everything above is *about this image*. Nothing below is, so nothing below may
-   * be the only reason to keep it.
+   * pass itself off as a description.
    *
    * Surrounding prose is enrichment and a decent tiebreaker, but on its own it
    * describes the page, not the picture — a 1px spacer in the body would inherit
    * the article's opening paragraphs and be stored as though someone had captioned
-   * it. A check caught exactly that. So: a direct descriptor is required, and the
-   * neighbourhood is only searched when the image sits in a container tighter than
-   * the whole document.
+   * it. A check caught exactly that. So it is only gathered when the image already
+   * has a direct descriptor and sits in a container tighter than the whole document.
    */
   const direct = parts.length;
 
@@ -261,19 +263,33 @@ function describeImage(img: HTMLImageElement): { text: string; title: string } |
     add('Nearby text', context);
   }
 
-  // A described image is worth keeping; a bare URL is not. The floor is a direct
-  // descriptor, not the boilerplate appended below.
-  if (direct === 0) return null;
-
+  /*
+   * Most images on the web say nothing about themselves. Refusing those was the
+   * first design and it was wrong: it refused exactly the ones worth keeping —
+   * screenshots, charts, diagrams — while a decorative logo with a dutiful alt
+   * attribute sailed through. Whether an image matters is a judgement, and this
+   * product already has somewhere judgements go.
+   *
+   * So an undescribed image is staged carrying NEEDS_DESCRIPTION, and the review
+   * queue shows it with the picture and refuses to let it be kept until a person
+   * has written what it is. Same bargain as every other capture — nothing enters
+   * the memory unexamined — rather than a machine deciding on your behalf that a
+   * picture was not worth the trouble.
+   */
   const title =
     img.getAttribute('alt')?.trim() ||
     img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() ||
     `Image from ${document.title || location.hostname}`;
 
+  if (direct === 0) {
+    parts.push(NEEDS_DESCRIPTION);
+    parts.push('Nothing on the page said what this image shows.');
+  }
+
   parts.push(`Image URL: ${img.currentSrc || img.src}`);
   parts.push(`Seen on: ${document.title || location.hostname} — ${location.href}`);
 
-  return { text: parts.join('\n'), title: title.slice(0, 120) };
+  return { text: parts.join('\n'), title: title.slice(0, 120), described: direct > 0 };
 }
 
 /**
@@ -288,12 +304,7 @@ async function keepImage(srcUrl: string) {
     return;
   }
   const described = describeImage(img);
-  if (!described) {
-    toast('This image has no caption or alt text — nothing to search on.', 'warn');
-    return;
-  }
-
-  toast('Keeping the image description…', 'warn');
+  toast('Keeping…', 'warn');
   const res = await chrome.runtime.sendMessage(
     envelope('worker', {
       kind: 'ingest',
@@ -302,11 +313,20 @@ async function keepImage(srcUrl: string) {
       // deduplicates, and recall hands back a URL that opens the picture itself.
       sourceUrl: img.currentSrc || img.src,
       title: described.title,
-      tags: ['image', location.hostname.replace(/^www\./, '')],
+      tags: [
+        'image',
+        ...(described.described ? [] : ['needs-description']),
+        location.hostname.replace(/^www\./, ''),
+      ],
     }),
   );
   if (res?.ok) {
-    toast('Kept the description · add detail in the review queue');
+    toast(
+      described.described
+        ? 'Kept the description · awaiting your review'
+        : 'Kept · the page said nothing about it, so describe it in the review panel',
+      described.described ? 'ok' : 'warn',
+    );
   } else {
     toast(String(res?.error ?? 'Failed to keep the image'), 'bad');
   }
