@@ -12,7 +12,9 @@
     "loop": "node probes/webmcp-loop.mjs",
     "ext": "node extension/build.mjs",
     "ext:watch": "node extension/build.mjs --watch",
-    "ext:check": "node probes/extension-check.mjs"
+    "ext:check": "node probes/extension-check.mjs",
+    "bridge": "node extension/connector/serve.mjs",
+    "ext:relay": "node probes/relay-check.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

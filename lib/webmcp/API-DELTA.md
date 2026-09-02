@@ -448,8 +448,36 @@ empty, and `JSON.stringify(err)` is `{}`. Logging `err.message` alone shows noth
 all, which is how this first appeared as three silent failures and a tool count that was
 simply short.
 
-**The two findings close the door on each other.** The document that can register tools
-(an ordinary web page) cannot reach the relay over https. The document that can reach
-the relay (an extension page) cannot register tools. Any desktop-agent bridge for normal
-browsing has to avoid both — extension messaging or native messaging rather than a
-loopback WebSocket from page context.
+### Follow-up: the cause, and the way through
+
+D17 was first measured only in an offscreen document and then generalised to "extension
+pages" without testing the others. That generalisation decided an architecture, so it was
+worth isolating — `probes/extension-origin-check.mjs` registers a trivial tool from an
+ordinary web page (control), the side panel, and a bare extension page in a tab.
+
+Every `chrome-extension://` context rejects, on the polyfill and on native alike. The
+polyfill throws a bare `SecurityError` with an empty message; **native Chromium 152 gives
+the actual reason**:
+
+```
+SecurityError: document.modelContext cannot be used when document.domain is enabled.
+```
+
+So it is the origin, not the offscreen context, and not something else the document was
+doing. Extension pages are simply not eligible.
+
+**The way through is the intersection of the two constraints, not a way around either.**
+D16 says the relay needs an `http` origin. D17 says the registering document cannot be an
+extension page. An ordinary page served over plain `http` on localhost satisfies both —
+and the extension already does the rest, since its content scripts register the memory
+tools on every page and inject the relay embed wherever the origin is `http`.
+
+That is `extension/connector/` (`pnpm bridge`): one small page whose whole job is to exist
+at an http origin. Measured end to end in `probes/relay-check.mjs` — a desktop MCP client
+starts the relay as a stdio subprocess, finds the tab as a source, lists
+`autorag_recall`, and gets back an approved passage with its source URL at high
+confidence. 6/6.
+
+**The transferable part:** two constraints that each rule out the obvious design can still
+leave exactly one thing standing. It is worth writing both down precisely enough to
+intersect them, rather than concluding after the first that the feature is impossible.

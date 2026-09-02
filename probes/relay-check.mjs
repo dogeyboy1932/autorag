@@ -85,6 +85,8 @@ const callTool = async (name, args = {}) => {
 
 /* ------------------------------------------------------------------ browser */
 
+let bridge = null;
+
 const browser = await puppeteer.launch({
   executablePath: '/snap/bin/brave',
   headless: false,
@@ -115,12 +117,22 @@ try {
   );
 
   /*
-   * Just opening a tab is enough: the extension's own worker document holds the
-   * bridge, so the memory is reachable regardless of what site is open. The tab
-   * exists here only to wake the extension.
+   * The bridge page, served over plain http on localhost.
+   *
+   * It has to be http and it has to be an ordinary web page: D16 says the relay's
+   * socket dies from an https origin, D17 says a chrome-extension:// origin cannot
+   * register tools at all. This is the only context that satisfies both, and the
+   * extension does the rest — its content scripts put the memory tools on this
+   * page and inject the relay embed because the origin is http.
    */
+  bridge = spawn('node', [resolve(here, '../extension/connector/serve.mjs')], {
+    stdio: 'ignore',
+    env: { ...process.env, PORT: '3210' },
+  });
+  await new Promise((r) => setTimeout(r, 600));
+
   const page = await browser.newPage();
-  await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:3210/', { waitUntil: 'domcontentloaded' });
   await page
     .waitForFunction(
       async () =>
@@ -129,6 +141,22 @@ try {
       { timeout: 30_000 },
     )
     .catch(() => {});
+
+  // Put something in the memory so recall has an answer to give, through the
+  // same tools an agent would use.
+  await page.evaluate(async () => {
+    const ctx = document.modelContext;
+    const all = await ctx.getTools();
+    const call = async (name, args) => {
+      const raw = await ctx.executeTool(all.find((t) => t.name === name), JSON.stringify(args));
+      const env = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return JSON.parse(env.content[0].text);
+    };
+    await call('autorag_remember_passage', {
+      text: 'The Autorag bridge page exists because a loopback WebSocket cannot be opened from an https origin, and WebMCP refuses tool registration on a chrome-extension origin.',
+      title: 'Why the bridge page exists',
+    });
+  });
 
   // Discovery is not instant; the embed has to connect and enumerate.
   let sources = null;
@@ -153,6 +181,50 @@ try {
       .filter((n) => n.includes('autorag'))
       .join(', ') || names.slice(0, 120),
   );
+
+  /*
+   * Approve what was staged, as the person would in the side panel.
+   *
+   * Without this the recall below returns zero hits and still "passes" — the
+   * approval gate is working exactly as designed and the assertion is simply too
+   * weak to notice. A check that goes green against an empty memory is not
+   * evidence of anything.
+   */
+  const swTarget = browser.targets().find((t) => t.url().includes('/background.js'));
+  const extId = swTarget ? new URL(swTarget.url()).host : null;
+  const panel = await browser.newPage();
+  await panel.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 1200));
+  const approved = await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'a', request: req }, res),
+      );
+    const pending = (await send({ kind: 'listPending' })).data ?? [];
+    if (!pending.length) return 0;
+    await send({ kind: 'approve', chunkIds: pending.map((p) => p.chunk_id) });
+    return pending.length;
+  });
+  log('the staged capture can be approved', approved > 0, `${approved} passage(s) approved`);
+
+  /*
+   * The one that matters. Everything above proves the wiring; this proves the
+   * product: a desktop MCP client, talking stdio to a relay it started itself,
+   * searching a memory that lives in the browser — with no API key and nothing
+   * leaving the machine.
+   */
+  const toolName =
+    (browserTools?.tools ?? []).map((t) => t.name).find((n) => n.endsWith('autorag_recall')) ??
+    'autorag_recall';
+  const recalled = await callTool(toolName, { question: 'Why does the bridge page exist?' });
+  const hits = recalled?.hits ?? [];
+  log(
+    'a desktop MCP client gets real passages back, with provenance',
+    hits.length > 0 && !!hits[0]?.source?.url,
+    hits.length
+      ? `${hits.length} passage(s), confidence ${recalled.confidence}, cites ${hits[0].source.url}`
+      : `no hits: ${JSON.stringify(recalled).slice(0, 120)}`,
+  );
 } catch (err) {
   log('run completed', false, String(err));
 } finally {
@@ -163,5 +235,10 @@ try {
   }
   await browser.close();
   relay.kill();
+  try {
+    bridge?.kill();
+  } catch {
+    /* never started */
+  }
   process.exit(passed === steps.length ? 0 : 1);
 }
