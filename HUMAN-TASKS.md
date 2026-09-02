@@ -241,18 +241,29 @@ Watch **Activity** during your first capture, and the model badge in the header.
 embedding, screening, downloading, and their outcomes.
 **Tell me if:** anything ever happens silently, or a spinner has no explanation next to it.
 
-### 11. Your desktop agent can search what you kept while browsing
+### 11. Talking to your memory (this is the payoff — do it once)
 
-*Meant to:* make the memory reachable from the tools you already work in, not only from the
-panel.
+Autorag is the **R** in RAG. It finds and returns passages; it never writes prose. The
+words come from whatever agent you already talk to, which reaches the corpus as ordinary
+MCP tools. Three ways in, cheapest first.
+
+**a. Claude Code, in this repo.** Already configured — `.mcp.json` registers the relay as
+an MCP server named `autorag`. You need two things running:
 
 ```bash
-pnpm bridge          # serves http://localhost:3210
+pnpm bridge      # serves http://localhost:3210
 ```
 
-Open `http://localhost:3210` in the browser where the extension is installed and **leave the
-tab open**. It should say *7 memory tools exposed to your desktop agent*. Then point any MCP
-client at the relay — Claude Desktop, Cursor, anything:
+Open `http://localhost:3210` in the browser where the extension is installed and **leave
+that tab open** (it should say *7 memory tools exposed to your desktop agent*). Then start
+a Claude Code session here and just ask:
+
+> What have I saved about tidal turbines?
+
+Claude calls `autorag_recall`, gets your passages back with their URLs, and writes the
+answer citing them. Nothing you kept goes anywhere except into that answer.
+
+**b. Claude Desktop or Cursor.** Same relay, their config file:
 
 ```json
 {
@@ -265,10 +276,23 @@ client at the relay — Claude Desktop, Cursor, anything:
 }
 ```
 
-Ask it: *"List the connected WebMCP sources, then search my memory for X."*
+Bridge running and its tab open, same as above.
+
+**c. An agent driving your browser.** No bridge needed — the seven tools are on whatever
+page it is looking at. This is the one that needs no setup at all, and the one no consumer
+product ships yet.
+
+**The two things that make it fail**, both quiet: the bridge tab must be open (the relay
+talks to a page, not to the extension), and something must be **approved** — pending
+passages are deliberately unsearchable, so a corpus you have kept but not reviewed answers
+nothing.
+
+### 11b. Checking the bridge when it misbehaves
+
+Ask your agent: *"List the connected WebMCP sources, then search my memory for X."*
 
 **Passes if:** it lists your browser as a source, sees the seven `autorag_*` tools, and gets
-back real passages with URLs.
+back real passages with URLs. `pnpm ext:relay` proves the same thing headlessly, 6/6.
 
 **Why the odd extra tab.** Two measured browser limits, both in `lib/webmcp/API-DELTA.md`: a
 `ws://127.0.0.1` socket cannot be opened from an `https://` page (D16), and WebMCP refuses to

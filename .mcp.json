@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "autorag": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@mcp-b/webmcp-local-relay@latest"
+      ],
+      "env": {}
+    }
+  }
+}
