@@ -86,3 +86,33 @@ Two beats that defeat "just paste it into context":
 - **Provenance** — the answer cites which sources supported it and when they entered.
 
 Show the queue as the human steering the corpus, not as a security checkpoint.
+
+---
+
+## A7. The extension, and what it does to A2 (2026-09-01)
+
+`autorag-build-plan.md` **AD-5** supersedes AD-3: there is now a browser extension, and
+it is the product. The web app remains as the deployed tool host, because tools published
+by an extension cannot be seen by an agent-browser that will not run extensions.
+
+**A2 needs one correction and gains one claim.**
+
+The correction: *"the page is the memory store"* was true of the web app and is not true
+of the extension, where the corpus lives in extension storage and outlives every tab. The
+durable version of that claim is **the browser is the memory store** — no server, no
+account, no sync.
+
+The new claim, and the strongest one available: **the memory travels.** Four tools are
+registered on `document.modelContext` of every page you visit — measured on sites that
+have no WebMCP of their own, `wikipedia.org` and `example.com` among them. A vector
+database sits behind an API something must be built against; this offers itself to any
+agent on any page, with no integration and no key. That is the part which is not
+commodity, and it is WebMCP doing it.
+
+A2's caution still applies: recheck the Devpost gallery before writing the final
+description.
+
+**A5.1 (cold start) now has a second face.** The 25MB model download happens inside the
+extension, where there is no page to show a progress bar on. The side panel reports model
+phase and percentage, and an activity feed shows chunking, embedding and screening as they
+happen — an empty corpus with no visible work looks identical to a broken tool.

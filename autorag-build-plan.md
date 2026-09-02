@@ -38,10 +38,35 @@ UI to build. This is the single biggest scope reduction available.
 | Framework | Next.js (static export or client-only) + Vercel | All logic in `"use client"` |
 | Optional UI | React Flow — corpus as a graph | Reuse from NodeFlow. Cut if time-pressed. |
 
-### AD-3: The agent harvests; the app ingests
-No browser extension. No cross-origin scraping. The agent navigates elsewhere, reads,
+### ~~AD-3: The agent harvests; the app ingests~~ — SUPERSEDED by AD-5
+~~No browser extension. No cross-origin scraping. The agent navigates elsewhere, reads,
 returns to Autorag, and calls `autorag_ingest_passage`. Keeps 100% of the engineering
-inside the thing being judged.
+inside the thing being judged.~~
+
+### AD-5: A browser extension is in scope (2026-09-01)
+**Supersedes AD-3.** Kept above rather than deleted, because the reasoning was sound and
+the cost of overturning it should stay visible.
+
+AD-3 assumed the agent does the gathering, so a human never pastes anything. That is
+elegant and it is still how the web app works. It has one problem: **it requires an agent
+to be present before the product does anything at all.** No WebMCP consumer ships to
+ordinary users yet, so under AD-3 the only reachable path for a person was the manual
+ingest form — pasting a URL and a passage into a dashboard. That is worse than the
+problem it set out to solve, and it is indistinguishable from an LLM wired to a vector
+database.
+
+The extension inverts it: you highlight, you keep, and capture costs one gesture where
+you already are. WebMCP's role moves from *the only way in* to *the reason the memory
+travels* — four tools registered on every page you visit, so any agent that speaks the
+standard finds your curated memory on whatever page it is already reading.
+
+**What it costs, stated plainly.** Tools published by an extension are invisible to any
+agent-browser that cannot run extensions — ChatGPT's in-app browser among them. That is
+precisely why the web app survives as the second artifact: it is the tool host an
+agent-browser can visit. Two artifacts, one `src/rag/` engine, distinct roles.
+
+AD-3's other clause holds unchanged: **no cross-origin scraping.** The extension reads
+only the tab you are looking at, only when you ask it to.
 
 ### AD-4: Human gate on write, not on read
 `requestUserInteraction` fires on **batch approval** and **destructive ops only**.

@@ -1,253 +1,192 @@
 # Handoff — read this first in a new session
 
-**Project:** Autorag — a browser-native, agent-curated retrieval memory exposed over
-WebMCP. Hackathon submission, deadline **Sep 3, 1:00pm PDT**.
-**Last worked:** 2026-09-01. **Branch:** `main`, 11 commits, **nothing pushed yet.**
+**Autorag** is a curated retrieval memory that lives in the browser. You keep things while
+you read; a human decides what stays; any agent that speaks WebMCP can search what
+survived. No server, no API key, no LLM anywhere in this repo.
+
+**Deadline:** Sep 3, 1:00pm PDT. **Branch:** `main`, 19 commits, **nothing pushed.**
+**Last worked:** 2026-09-01.
 
 ---
 
-## 0. Sixty-second orientation
+## 0. There are two artifacts. Understand this first.
+
+They share one engine (`src/rag/`) and have different jobs. Neither is dead code.
+
+| | **Extension** (`extension/`) | **Web app** (`app/`, `src/webmcp/`) |
+|---|---|---|
+| Role | **the product** | the deployed tool host |
+| Capture | highlight → Keep · `Ctrl+Shift+S` · whole-page preview | agent calls `autorag_ingest_passage`; manual form as fallback |
+| Tools | 4, injected into **every page you visit** | 15, on its own page, both registration APIs |
+| Corpus | extension storage, outlives every tab | IndexedDB on its own origin |
+| Reached by | a desktop MCP client, via `pnpm bridge` | any agent that can visit a URL |
+
+**Why both.** Tools published by an extension are invisible to an agent-browser that
+cannot run extensions — ChatGPT's in-app browser among them. The web app is the artifact
+such an agent can visit. See `autorag-build-plan.md` **AD-5**.
+
+The two corpora are separate. Accepted limitation, not an oversight: different origins,
+and IndexedDB does not cross origins.
+
+---
+
+## 1. Sixty-second orientation
 
 ```bash
 cd /home/dogeyboy19/Desktop/gtmp/AutoRag
-git log --oneline          # 11 commits, all local
-pnpm install               # if node_modules is missing
-pnpm dev                   # http://localhost:3111
-pnpm bench                 # retrieval benchmark; must print 21/21, 3/3, 25/25
-pnpm loop                  # whole product through WebMCP on Brave; must print 15/15
+pnpm install
+
+# The product
+pnpm ext                  # build the extension
+#   brave://extensions → Developer mode → Load unpacked → extension/dist
+pnpm ext:check            # 13/13 against a real Brave, throwaway profile
+
+# The desktop bridge
+pnpm bridge               # serves http://localhost:3210 — leave the tab open
+pnpm ext:relay            # 6/6 — a real MCP client searching the memory
+
+# The web app
+pnpm dev                  # http://localhost:3111
+pnpm bench                # 21/21, 3/3, 25/25
+pnpm loop                 # 15/15 through WebMCP on Brave
 ```
 
-Then read, in order: **`MANUAL.md`** (what it is, how to test it) →
-**`lib/webmcp/API-DELTA.md`** (what the browser actually does — 15 findings, all
-verified by running them) → **`lib/tool-design/TOOL-CONTRACT.md`** (the 15 tool schemas).
+Then read **`extension/README.md`** (install and use) → **`lib/webmcp/API-DELTA.md`**
+(17 findings, every one reproduced by running it) →
+**`lib/tool-design/TOOL-CONTRACT.md`** (the web app's 15 schemas).
 
-**Chrome must be launched as** `google-chrome --enable-features=WebMCP`.
-The switch `--enable-webmcp-testing` does *not* work despite the flag existing.
-**Brave works too** — `brave-browser --enable-features=WebMCP`, verified native on
-Chromium 152. `pnpm loop` runs the whole product against it: 15/15.
+**Browsers.** Brave 1.94.117 (Chromium 152) and Chrome 151, both verified. Native WebMCP
+needs `--enable-features=WebMCP`; **quit the browser completely first** or the flag is
+silently ignored and you get a page with no tool surface and no error saying why. Without
+it the `@mcp-b/global` polyfill takes over and everything still works.
 
 ---
 
-## 1. MCP servers — no restart needed any more
+## 2. The pivot, and why — read this before changing direction again
 
-Two servers are registered in this project and **both are connected**:
+The build plan's **AD-3** said, verbatim, *"No browser extension."* Its idea of seamless
+was that **the agent** does the gathering, so a person never pastes anything. That is
+elegant, and it has one fatal problem: it requires an agent to be present before the
+product does anything at all. No WebMCP consumer ships to ordinary users yet — so the only
+path actually available to a person was the manual ingest form. Pasting a URL into a
+dashboard is worse than the problem it set out to solve, and indistinguishable from an LLM
+wired to a vector database.
 
-| Server | Command | Gives you |
+So AD-3 is superseded by **AD-5**: the extension is the product, capture costs one gesture
+where you already are, and WebMCP's role moves from *the only way in* to *the reason the
+memory travels*.
+
+This was not written down while it happened, and four planning documents ended up
+describing a project that no longer existed. That is why this file was rewritten. **If you
+change direction again, amend `autorag-build-plan.md` in the same commit.**
+
+---
+
+## 3. What is verified
+
+Every row is a command that produces the number, not an assertion.
+
+| Surface | Command | Result |
 |---|---|---|
-| `chrome-devtools` | `npx -y @mcp-b/chrome-devtools-mcp@2.3.2 --isolated` | `list_webmcp_tools`, `call_webmcp_tool`, page control |
-| `webmcp-docs` | `https://docs.mcp-b.ai/mcp` | current WebMCP docs |
+| Retrieval quality | `pnpm bench` | top-1 21/21 · no overclaim 3/3 · no withhold 25/25 |
+| Web app tool surface | `pnpm loop` | 15/15 on Brave; also verified on Chrome 151 |
+| Tool contract | `evals/RESULTS.md` | 11/11, five defects found and fixed by running it |
+| Extension end to end | `pnpm ext:check` | 13/13 |
+| **Desktop agent** | `pnpm bridge` + `pnpm ext:relay` | **6/6** |
+| Extension origins | `node probes/extension-origin-check.mjs` | every extension context rejects; a web page works |
 
-Verify with `claude mcp list`. If the tools are missing from your session, **restart
-Claude Code** — MCP servers load at session start, so a server added mid-session stays
-invisible until then. That cost this project a day of testing through the wrong path
-(see §3, D12).
-
-> ⚠️ **Pin the version.** `@mcp-b/chrome-devtools-mcp@latest` (3.0.0) is broken: its
-> `package.json` declares `files: ["build/src"]` but the tarball ships 3 files and no
-> `build/`, so `npx` fails with `chrome-devtools-mcp: not found`. Use `2.3.2`.
-
----
-
-## 2. What is built and verified
-
-Phases 0–4 of `autorag-build-plan.md` are complete.
-
-| Area | State |
-|---|---|
-| RAG core (`src/rag/`) | embed · chunk · store · search · lexical · screen · ingest |
-| Tool surface (`src/webmcp/`) | 14 imperative tools + 1 declarative form-derived |
-| Curation | review queue, conflict badges, agent adjudication, activity log |
-| Retrieval | hybrid dense+BM25, typo tolerance, calibrated confidence |
-| UI | ingest, review, search, corpus management, activity, declarative form |
-| Docs | README, MANUAL, TOOL-CONTRACT, API-DELTA, DEMO-SCRIPT, SUBMISSION, HUMAN-TASKS |
-| Build | `pnpm build` static export clean; full loop verified on the export |
-
-**Measured, not asserted:**
-
-```
-pnpm bench    top-1 21/21    no overclaim 3/3    no withhold 25/25
-```
-
-Also verified by running: cross-session persistence across a full browser restart,
-stale demotion at exactly 0.60, structured errors on every failure path, dynamic tool
-registration through the MCP bridge, and — as of 2026-09-01 — the declarative `<form>`
-tool actually **called** through the bridge, returning a result and staging a passage.
-
-That last one had been recorded here as verified when all that had been checked was that
-it *appeared* in `getTools()`. It was in fact broken: an agent's call hung for 120s and
-staged nothing. See API-DELTA D14. Treat "appears in `getTools()`" as evidence of
-nothing.
+`pnpm ext:check` covers the claims that matter: a third-party page gains a WebMCP surface
+it never had, the four memory tools appear on it, a highlight-and-click actually stores
+text, whole-page capture previews before storing, the corpus can be managed, and
+keep → approve → recall returns the passage with its source.
 
 ---
 
-## 3. The findings that shaped the design
+## 4. The findings that shaped the design
 
-All in `lib/webmcp/API-DELTA.md` with reproductions. The ones that matter most:
+All 17 in `lib/webmcp/API-DELTA.md` with reproductions. The five that cost the most:
 
-**D12 — MCP bridges forward only an MCP `CallToolResult` envelope.** The big one.
-`executeTool()` from page script serializes anything, so bare objects tested fine. But
-agents connect through an MCP bridge, and it silently drops any other shape. For most
-of the build **all 15 tools returned empty to every agent** while every test passed.
-Fixed centrally in `toCallToolResult()` in `src/webmcp/registry.ts`. *Lesson: test
-through the path the consumer actually uses.*
+**D12 — MCP bridges forward only a `CallToolResult` envelope.** `executeTool()` from page
+script serializes anything, so bare objects tested fine while **all 15 tools returned
+empty to every agent**. Fixed centrally in `toCallToolResult()`.
 
-**D11 — aborting a tool group destroys that group's own in-flight call.** Chrome 151
-rejects the pending `executeTool` with `UnknownError`. `autorag_approve_pending` empties
-the queue and so retracts its own group: the approval committed, then the agent got an
-opaque exception, and a retry returned `NOT_FOUND`. Hence `src/webmcp/lifecycle.ts`
-splits directions — `syncToolGroups()` only adds (synchronously, so an agent told to
-poll a tool finds it), `sweepRetired()` only removes (from a React effect, after the
-call returns).
+**D14 — a declarative `<form>` tool is discoverable long before it is callable.** It
+listed correctly in `getTools()` for the whole build and was recorded as verified on that
+basis. Calling it hung for 120s and stored nothing. Needed `toolautosubmit` (spelled
+`toolautosubmit=""` or React drops it) *and* `SubmitEvent.respondWith()` *and* D12's
+envelope.
 
-**D3/D4 — `execute` takes one argument; `requestUserInteraction` does not exist.**
-Chrome's docs show `(params, {signal})`. The runtime disagrees, on native and polyfill.
-There is no second argument, so nothing can carry `requestUserInteraction`. The human
-gate is therefore in-page, which is the better design anyway.
+**D15 — resetting a form cancels the invocation it is answering.** The handler cleared its
+own fields on success, which on Chromium 152 kills the agent's pending call *after* the
+work commits. Chrome 151 passed this; Brave caught it.
 
-**D5 — `inputSchema` differs by Chrome version.** Native 149–153 returns a serialized
-string; 154+ and the polyfill return an object. Always use `normalizeInputSchema()`.
-
-**D15 — resetting a form cancels the invocation it is answering.** Found by running on
-Brave. The declarative form cleared its fields on success; on Chromium 152 that reset
-kills the agent's pending call *after* the passage is staged — `UnknownError: Tool
-execution cancelled by a form reset`. D11's shape by a different route. Reset only when
-`!submit.agentInvoked`. **Chrome 151 passed this; Brave caught it.** That is the whole
-argument for `pnpm loop --executable <path>` on more than one engine.
-
-**D14 — a declarative `<form>` tool is discoverable long before it is callable.** The
-one that had been wrongly marked verified. `toolautosubmit` (spelled `toolautosubmit=""`
-in React, or it never reaches the DOM) is what makes anything submit at all;
-`SubmitEvent.respondWith()` is the only channel back to the agent; and D12's envelope
-applies on this path too. Missing any one of the three yields a tool that lists
-perfectly and does nothing.
-
-**D13 — `registerTool` rejects with `AbortError` if its signal fires mid-call.** Benign,
-but it left an uncaught rejection in the console on every dev load, because
-`registerGroup` aborts the previous controller and StrictMode double-invokes the effect.
-`registerGroup` now absorbs an abort of its own controller and returns `false`, and
-`addMissing` takes its group flags from that return value instead of setting them
-optimistically. Same primitive as D11, opposite direction: an aborted *execution* is
-unrecoverable, an aborted *registration* is fine.
-
-**Bugs in our own code, all caught only by measuring:**
-
-- *Contradiction detection was inverted.* Contradictory passages are textually
-  near-identical ("Max, 92%" vs "Netflix, 79%" scores 0.93), so the near-duplicate
-  check swallowed every contradiction. The differing-figures test must run first.
-- *Screening ignored pending material.* Agents harvest in bursts before anything is
-  approved, so a four-source batch containing a flat contradiction produced **zero**
-  flags. Now all three statuses are screened.
-- *Five defects in the tool contract*, found by actually running `evals/` through the
-  bridge. Written up in `evals/RESULTS.md`; the pattern is in §4 rule 5.
-- *The declarative form was never called, only listed* — D14 above. Alongside it: the
-  form-derived tool was invisible to the activity log, `event.currentTarget` was null
-  after the first `await` so a successful human submit rendered an error, and the
-  numeric-token regex turned "March 1, 2024" into a figure called `1,`.
+**D16 + D17 — the pair that closed the door on each other, then opened one.** The relay
+cannot bridge an `https://` page (`ws://127.0.0.1` dies mid-handshake). Extension origins
+cannot register tools at all — native gives the reason the polyfill hides behind an empty
+`SecurityError`: `document.modelContext cannot be used when document.domain is enabled`.
+The way through was their *intersection*: an ordinary page served over plain http on
+localhost is the one context that is neither. That is `extension/connector/`.
 
 ---
 
-## 4. Architecture rules — do not regress these
+## 5. Architecture rules — do not regress these
 
-Both were violated once and fixed. They are the same lesson twice: **every layer does
-only what it is actually capable of.**
-
-1. **Screening nominates; it never rules.** Embedding distance can establish two
-   passages are about the same subject, never that they disagree. `screen.ts`
-   shortlists → `autorag_adjudicate_conflict` lets the agent rule → the human decides.
-
+1. **Screening nominates; it never rules.** Embedding distance establishes two passages are
+   about the same subject, never that they disagree. `screen.ts` shortlists → the agent
+   adjudicates → the human decides.
 2. **Retrieval reports; it never instructs.** Autorag has no LLM and cannot see the
-   caller's conversation, so it must not decide a question is unanswerable.
-   `coverage_note` once emitted *"say so rather than inferring an answer"* — a retriever
-   overruling an LLM on information it does not have. A follow-up like "how long is it"
-   scores 0.10 yet the passage contains the runtime, and only the agent knows what "it"
-   means. Now it returns passages **always**, plus `match_signals`, and the agent judges.
-
+   caller's conversation, so it must not decide a question is unanswerable. Passages come
+   back **always**, plus `match_signals`.
 3. **Never say "train."** Nothing is trained. Say ingest, index, memory, corpus.
-
-4. **The review queue is steering, not security.** Do not pitch it as a defence against
-   anything (`amendments.md` A1, A4).
-
-5. **A tool is not verified until a call through the bridge returns the right answer
-   AND leaves the right state behind.** Both halves. The declarative form listed
-   correctly in `getTools()` for the whole build and was recorded as verified on that
-   basis; it hung on every actual call (D14). D12 was the same mistake at a lower level.
-   The check in §10 exists because of this and is not optional.
-
-6. **A description describes what the runtime does, not what you wish it did.** Three of
-   the five eval defects were the same shape: `forget_source` promised a dry run and
-   returned an error; `get_stats` claimed to summarize the memory while omitting the
-   field an agent needed; a conflict flag said figures "differ" when all it had computed
-   was a set difference. Agents believe descriptions. When you change a payload, reread
-   the sentence that promises it.
-
----
-
-## 5. What is NOT verified — the honest gap
-
-**Narrowed on 2026-09-01, not closed.**
-
-The eleven questions in `evals/autorag_eval.xml` have now been run end to end through
-the MCP bridge and score 11/11 — see `evals/RESULTS.md`, which also lists the five
-defects the run found. Every tool in the surface has been called through the path an
-agent actually connects over, including the rejection-memory round trip.
-
-What that does **not** establish is the one claim `amendments.md` A5.2 says the
-submission is won on:
-
-> An agent, seeing only the tool descriptions, picks the right tool with the right
-> arguments.
-
-The caller in that run had the repo in context. So the eval proves the arguments are
-guessable from the schemas and the results answer the questions — but not the *choice*
-of tool, which is the failure mode that overlapping descriptions cause. Nothing here can
-prove that except an agent that has never seen this code.
-
-**To close it:**
-
-1. Point an agent with none of this context at `http://localhost:3111` and ask only:
-   *"Figure out what this page does and save something useful to it."* Watch which tool
-   it reaches for first and whether it invents arguments.
-2. Give it the eleven questions and diff against the answer key.
-3. Any wrong tool choice is a **description bug**, not an agent bug. Fix the wording —
-   that is what happened to all five defects in `RESULTS.md`.
+4. **The review queue is steering, not security** (`amendments.md` A1, A4).
+5. **A description describes what the runtime does, not what you wish it did.** Three eval
+   defects were this exact shape. Agents believe descriptions.
+6. **A tool is not verified until a call through the consumer's path returns the right
+   answer AND leaves the right state behind.** Both halves. D12, D14, and one weak check in
+   `relay-check.mjs` that went green against an empty memory were all this mistake.
 
 ---
 
 ## 6. What is left
 
-**Blocked on the user** (`HUMAN-TASKS.md` is the full walkthrough to demo-ready):
+**Nobody is blocking these:**
 
-- [ ] Push the repo. `gh` is authed as `dogeyboy1932`. The command is
-      `gh repo create autorag --public --source=. --remote=origin --push`.
-      Claude is blocked from running this by the permission classifier — publishing is
-      the user's call. Must be **public** for the MIT licence to show in GitHub's About
-      panel, which the submission requires.
-- [ ] Deploy (Vercel account exists; static export also works on Netlify).
-- [ ] Record the video — script ready in `lib/demo/DEMO-SCRIPT.md`.
-- [ ] Submit on Devpost (already registered). Draft in `SUBMISSION.md`, all four
-      required questions answered.
+- [ ] Rewrite `lib/demo/DEMO-SCRIPT.md` for the extension as lead: highlight on a real
+      site → conflict in the review queue → reject on camera → recall with provenance →
+      the agent calling the tools through chrome-devtools-mcp.
+- [ ] `SUBMISSION.md` — extension as headline, URLs filled in.
+- [ ] Strip `page_heading`, the demo tool `@mcp-b/global` registers on every page.
+- [ ] The blind-agent test (§7). Highest-value engineering left.
 
-**Deferred by decision, do not "fix":**
+**Blocked on the user** (`HUMAN-TASKS.md`):
 
-- ChatGPT's in-app browser is **out of scope**. Docs say Chrome 151 is the tested
-  surface and other hosts are untested. Do not add claims about untested hosts.
-- Token benchmark (`webmcp-devtools-takeaways.md` §3) cut for functionality. ~1h to
-  reinstate; needs an `ANTHROPIC_API_KEY`, which nothing else in the project does.
-- React Flow corpus graph — build last or not at all.
-- `find_gaps` / `get_frontier` — stay out unless there is real computation behind them.
+- [ ] Push. `gh` is authed as `dogeyboy1932`; must be **public** for the MIT licence to
+      show. `gh repo create autorag --public --source=. --remote=origin --push`
+- [ ] Deploy the web app (static export; Vercel account exists). Then
+      `pnpm loop --url <deploy>` to confirm the surface survives hosting.
+- [ ] Record the video, submit on Devpost.
+
+**Deferred by decision — do not "fix":** ChatGPT's in-app browser is untested and
+unclaimed; the token benchmark is cut; `find_gaps` stays out unless there is real
+computation behind it.
 
 ---
 
-## 7. Decisions already made — don't relitigate
+## 7. The one test nobody has run
 
-| Decision | Why |
-|---|---|
-| Corpus is **movies & streaming** | Availability rots and aggregators disagree, so curation has real material. Real sources with a synthetic fallback for recording. |
-| Human gate is **in-page** | `requestUserInteraction` does not exist (D4). |
-| Conflicts: **heuristic nominates, agent adjudicates** | Neither can do the other's job. |
-| **No secrets.** `.env.local.example` is entirely commented out | Needing no API key *is* the architectural claim. |
-| Deploy target **Vercel**, static export | Keeps Netlify available. |
-| MCP-B extension is **dev-loop only** | The submission must not require a judge to install anything. |
+Every test either names a tool directly or is driven by someone who already knows what the
+descriptions mean. So this is still unproven:
+
+> An agent, seeing only the tool descriptions, picks the right tool with the right
+> arguments.
+
+MCP exists so a model can choose the appropriate tool, which makes this the claim the
+whole thing rests on.
+
+**How:** a fresh agent session with no context, pointed at a page with the extension
+installed, told only *"save something useful from this page."* Watch which tool it reaches
+for and whether it invents arguments. A wrong choice is a **description bug** — fix the
+wording in `extension/src/content/webmcp.ts`.
 
 ---
 
@@ -255,39 +194,44 @@ prove that except an agent that has never seen this code.
 
 | Symptom | Reality |
 |---|---|
-| Only 4–5 tools listed at first | Correct. Approval tools appear when something is staged; retrieval tools when something is approved. |
-| `call_webmcp_tool` returns "no output" | **A real bug.** Result shape is wrong — see D12. |
-| A one-word search scores 0.2 and is right | Normal. Short queries always score low; trust `confidence`, not the number. |
-| `how long is it` reports low confidence | Correct. The score measures wording overlap; the passage still contains the answer and the note says so. The agent decides. |
-| First page load takes ~60s | 25MB model download, cached afterwards. |
-| Backend reports `wasm` not `webgpu` | Fine. Headless Chrome has no GPU adapter. |
-| Header badge says 15 tools, `alwaysTools` etc. sum to 14 | Correct. The badge reads `getTools()`, so it counts the form-derived tool the browser adds without going through `registerGroup`. |
-| Screening flags a pair over years like 2024/1965 | Expected. The check is a set difference over numbers, and the flag now says exactly that. Adjudication is where meaning enters. |
-
-Changing `next.config.mjs` needs the dev server restarted; `devIndicators: false` was
-added there so the floating chip stays out of the video, and it will not take effect
-until you restart `pnpm dev`.
+| Extension: model never becomes ready | Brave Shields blocking the one-time `huggingface.co` download. Drop once, reload, restore. |
+| Extension: silently dead after a dependency change | MV3 forbids WASM without `'wasm-unsafe-eval'`, and transformers.js pulls its ONNX backend from a CDN the same CSP blocks. Both handled; the runtime is vendored into `dist/ort/`. The symptom lies: weights reach 100%, then "no available backend found". |
+| `page_heading` on every page | `@mcp-b/global` registers it. Not ours. |
+| Web app: only 5 tools at first | Correct. Approval tools appear when something is staged, retrieval tools when something is approved. |
+| `call_webmcp_tool` returns "no output" | Results are not reaching agents — D12. |
+| A tool call hangs to a 120s timeout | Nothing is submitting — D14. |
+| Returns fine but the counts did not move | It answered without doing the work. |
+| A one-word search scores 0.2 and is right | Normal. Trust `confidence`, not the number. |
+| Conflicts list years among the figures | It over-flags on purpose, and claims only that the two passages carry numbers the other does not. |
+| Screening missed a real conflict | Known. One measured miss scored 0.659 against `SAME_TOPIC_AT` 0.72. It nominates; you rule. |
+| `chrome-devtools-mcp` sees no extension tools | That harness did not inject our content scripts. Use `pnpm ext:check` or `pnpm ext:relay`. |
 
 ---
 
 ## 9. Repo map
 
 ```
-MANUAL.md          ← plain-language guide + test plan. Start here.
-HANDOFF.md         ← this file
-HUMAN-TASKS.md     ← ordered walkthrough from here to demo-ready: run it, test it, use it
-SUBMISSION.md      ← Devpost draft, four required questions answered
-README.md          ← technical README for judges
-lib/webmcp/API-DELTA.md        ← 15 verified findings. Highest-value doc.
-lib/tool-design/TOOL-CONTRACT.md  ← all 15 tool schemas
-lib/demo/DEMO-SCRIPT.md        ← shot-by-shot video script
-lib/rag/chunking-notes.md      ← chunk sizes, normalization, backend choice
-bench/             ← retrieval benchmark (pnpm bench)
-evals/             ← 11 QA pairs + seed corpus + RESULTS.md (run, but not blind)
-probes/            ← webmcp-loop.mjs (pnpm loop) + pages used to establish API-DELTA facts
-src/rag/           ← embed · chunk · store · search · lexical · screen · ingest · bus
-src/webmcp/        ← registry · lifecycle · errors · tools/
-components/        ← ReviewQueue (the star of the video), CorpusView, ActivityLog, …
+extension/          THE PRODUCT
+  src/content/        selection.ts (capture + bridge) · webmcp.ts (tools on every page)
+  src/offscreen/      owns the corpus and the model; survives the service worker
+  src/sidepanel/      review queue · recall · manage corpus · activity
+  connector/          the http page the desktop bridge needs (pnpm bridge)
+  README.md           install and use
+
+src/rag/            THE ENGINE, shared by both — embed · chunk · store · search · screen
+src/webmcp/         the web app's 15-tool surface
+app/ components/    the web app
+
+probes/             webmcp-loop · extension-check · relay-check · extension-origin-check
+bench/              retrieval benchmark (pnpm bench)
+evals/              11 QA pairs + RESULTS.md (11/11, five defects found)
+
+lib/webmcp/API-DELTA.md        17 verified findings. Highest-value doc in the repo.
+lib/tool-design/TOOL-CONTRACT.md
+autorag-build-plan.md          AD-5 supersedes AD-3. Read §2 above first.
+amendments.md                  A7 is current.
+HUMAN-TASKS.md                 what only the user can do
+MANUAL.md                      plain-language guide — written for the web app
 ```
 
 ---
@@ -295,28 +239,12 @@ components/        ← ReviewQueue (the star of the video), CorpusView, Activity
 ## 10. If you change one thing, re-run these
 
 ```bash
-pnpm typecheck
-pnpm build
-pnpm bench                    # 21/21, 3/3, 25/25
+pnpm typecheck && pnpm build && pnpm ext
+pnpm bench                                  # 21/21, 3/3, 25/25
+pnpm ext:check                              # 13/13
+pnpm bridge & pnpm ext:relay                # 6/6
+pnpm loop                                   # 15/15
 ```
 
-Then `pnpm loop`, which is the automated version of everything below — fifteen
-assertions driven through `executeTool`, exiting non-zero on any failure. Run it on a
-second engine before believing a green result; D15 was green on Chrome and red on Brave.
-
-And by hand, because a green suite is not the same as watching it work, call **both
-registration paths** through the MCP bridge:
-
-> Using chrome-devtools, call `autorag_get_stats` on http://localhost:3111.
-> Then call `autorag_submit_passage_form` with a real passage, and check
-> `autorag_get_stats` again to confirm `pending` went up.
-
-Three failure signatures, all of which have happened here:
-
-| What you see | What it means |
-|---|---|
-| "Completed with no output" | Results are not reaching agents — D12 envelope missing. |
-| The call hangs until the 120s timeout | Nothing is submitting — D14, `toolautosubmit`. |
-| Returns fine but `pending` did not move | It answered without doing the work. |
-
-The last row is why the state check is part of the test and not an afterthought.
+Run `pnpm loop` on a second browser before believing a green result: D15 was green on
+Chrome and red on Brave.
