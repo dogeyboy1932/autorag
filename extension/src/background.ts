@@ -45,6 +45,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true; // async reply
 });
 
+/**
+ * Manifest content scripts only reach tabs opened *after* the extension loads.
+ *
+ * Every tab already open when you install or reload it has no Autorag in it at all:
+ * highlighting shows no Keep button, and the panel's preview asks a content script
+ * that was never injected. The symptom is indistinguishable from a broken
+ * extension, it happens to everyone exactly once — on the install, the moment they
+ * are deciding whether this thing works — and the natural test is the tab they were
+ * already reading. So do the injection Chrome does not.
+ */
+async function injectIntoOpenTabs(): Promise<void> {
+  // `world` is real in MV3 but missing from @types/chrome's content-script shape.
+  const declared = (chrome.runtime.getManifest().content_scripts ??
+    []) as (chrome.runtime.ManifestV3['content_scripts'] extends (infer T)[] | undefined
+    ? T & { world?: 'MAIN' | 'ISOLATED' }
+    : never)[];
+  const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    for (const script of declared) {
+      if (!script.js?.length) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: script.js,
+          world: script.world === 'MAIN' ? 'MAIN' : 'ISOLATED',
+        });
+      } catch {
+        // Expected on tabs no extension may touch — the web store, a page mid
+        // navigation, a PDF viewer. Not worth a log line each; the others succeed.
+      }
+    }
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'autorag-keep',
@@ -52,6 +87,13 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['selection'],
   });
   void ensureOffscreen();
+  void injectIntoOpenTabs();
+});
+
+// Reloading an unpacked extension during development fires onStartup, not
+// onInstalled, and leaves every open tab in the same scriptless state.
+chrome.runtime.onStartup.addListener(() => {
+  void injectIntoOpenTabs();
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {

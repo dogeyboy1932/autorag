@@ -143,7 +143,7 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<React.ReactNode>(null);
 
   useEffect(() => {
     const read = async () => {
@@ -162,7 +162,33 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
   async function show(what: string) {
     setNote(null);
     const p = await toActiveTab<Preview>(what);
-    if (!p) return setNote('Cannot read this tab. Browser pages and PDFs are off limits.');
+    if (!p) {
+      /*
+       * Silence from the tab has three causes and they need three different
+       * sentences. The old message named PDFs for all of them, which sent people
+       * looking for a problem with the page they were on; the actual cause, almost
+       * always, is a tab that predates the extension and therefore has no content
+       * script in it. That is now injected on install — this branch is the fallback
+       * for a tab the injection could not reach, and it should say which.
+       */
+      const url = tab?.url ?? '';
+      if (!/^https?:\/\//.test(url)) {
+        return setNote('Browser pages and the extensions gallery are off limits to every extension, including this one. Try an ordinary web page.');
+      }
+      if (/\.pdf(\?|#|$)/i.test(url)) {
+        return setNote("This is a PDF. The browser renders it in its own viewer, which no extension can read text out of. Select the text and use Keep, or copy it into the web app.");
+      }
+      return setNote(
+        <>
+          This tab has no Autorag in it — it was open before the extension was loaded
+          or reloaded.{' '}
+          <button className="linky" onClick={() => tab?.id && chrome.tabs.reload(tab.id)}>
+            Reload the page
+          </button>{' '}
+          and it will work.
+        </>,
+      );
+    }
     if (p.text.trim().length < 50) {
       return setNote(
         what === PREVIEW_SELECTION

@@ -24,6 +24,12 @@ Then in Brave or Chrome: `brave://extensions` → **Developer mode** (top right)
 
 That is the whole install. It now runs on every tab; nothing to start, no server.
 
+**If you reload the extension while working on it**, tabs that were already open get the
+new code injected automatically on install and on browser start — but a mid-session
+*reload* of an unpacked extension may not reach them. If a page stops responding to
+highlights after you reload the extension, reload the page. The panel says so explicitly
+when it happens rather than blaming the page.
+
 **The first capture takes about a minute** while a 25MB embedding model downloads, once.
 The side-panel header tracks it: `downloading model 40%` → `model ready · wasm`. Cached
 after that.
@@ -64,6 +70,11 @@ Chromium drops a key it considers taken without saying a word. This bit us: `Ctr
 was the original default and Brave's own screenshot tool owns it, so that shortcut never
 existed while three documents told people to press it. `pnpm ext:check` now fails if any
 declared shortcut comes back unassigned.
+
+**If the panel says the shortcut is unassigned**, the browser refused it and there is no
+way around that except picking another: click **Assign one** in the panel (or go to
+`brave://extensions/shortcuts`), find *Keep the highlighted text in Autorag*, click the
+box and press your key. Assigning by hand always wins over the manifest's suggestion.
 
 **Passes if:** each of the four stores something, and you never had to leave the page.
 **Tell me if:** any of them costs a second gesture, or gives you no sign it worked.
