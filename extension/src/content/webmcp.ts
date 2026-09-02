@@ -4,11 +4,17 @@
  * **This is the part that is not "an LLM with a vector database".**
  *
  * A vector database sits behind an API that something has to be integrated with.
- * These four tools are registered on `document.modelContext` of whatever page you
+ * These seven tools are registered on `document.modelContext` of whatever page you
  * happen to be reading, so any WebMCP-aware agent driving your browser — Chrome's
  * own, a coding agent over an MCP bridge, anything that speaks the standard —
  * discovers your curated memory *on the page it is already looking at*, with no
  * integration, no endpoint, no key.
+ *
+ * Three of the seven exist to keep the curation loop whole: an agent can read the
+ * review queue and rule on a flagged pair, so screening's deliberate over-flagging
+ * is triaged before it reaches a person. It cannot approve or discard — those two
+ * verbs are deliberately absent from this surface, and live only in the side panel
+ * where the person is. Nominate, adjudicate, decide: the third belongs to a human.
  *
  * The agent does not know Autorag exists. It sees `autorag_remember_selection`
  * next to whatever tools the site itself offers, and can move what it is reading
@@ -64,11 +70,18 @@ function toCallToolResult(value: unknown) {
   return result;
 }
 
-async function proxy(request: Request) {
+/**
+ * `listKey` names the array a list request answers with. Without it, spreading an
+ * array into the result object turns it into `{"0": …, "1": …}` — valid JSON that
+ * an agent cannot page or count. Only list requests need it.
+ */
+async function proxy(request: Request, listKey?: string) {
   const r = await ask(request);
-  return toCallToolResult(
-    r.ok ? { ok: true, ...(r.data as object) } : { ok: false, error: { message: r.error } },
-  );
+  if (!r.ok) return toCallToolResult({ ok: false, error: { message: r.error } });
+  const data = Array.isArray(r.data)
+    ? { [listKey ?? 'items']: r.data, total_count: r.data.length }
+    : (r.data as object);
+  return toCallToolResult({ ok: true, ...data });
 }
 
 /** What the user currently has highlighted, plus where they are. */
@@ -161,6 +174,96 @@ const tools = [
     },
     annotations: { readOnlyHint: true },
     execute: (input: { question: string }) => proxy({ kind: 'answer', question: input.question }),
+  },
+  {
+    name: 'autorag_list_pending',
+    description:
+      "List the passages the person has kept but not yet reviewed, with anything screening flagged about them. Nothing here is searchable yet. Use it to see what you or they have captured this session, and to find flagged pairs worth ruling on with autorag_adjudicate_conflict. Each flagged pair carries both passages, so you can read the claims rather than trust the flag. You cannot approve or discard: that is the person's decision, made in the Autorag side panel.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        only_conflicted: {
+          type: 'boolean',
+          description:
+            'When true, return only passages screening flagged. Use this when your intent is to adjudicate rather than to survey.',
+        },
+      },
+    },
+    annotations: { readOnlyHint: true },
+    execute: async (input: { only_conflicted?: boolean }) => {
+      const r = await proxy({ kind: 'listPending' }, 'pending');
+      if (!input?.only_conflicted) return r;
+      const body = r.structuredContent as
+        | { ok?: boolean; pending?: { conflicts: unknown[] }[] }
+        | undefined;
+      if (!body?.ok || !body.pending) return r;
+      const flagged = body.pending.filter((p) => p.conflicts.length > 0);
+      return toCallToolResult({ ok: true, pending: flagged, total_count: flagged.length });
+    },
+  },
+  {
+    name: 'autorag_adjudicate_conflict',
+    description:
+      'Rule on a pair of passages that screening flagged. Screening only nominates: it can see that two passages are about the same subject and carry different figures, never whether they actually disagree. Read both — autorag_list_pending returns each flagged passage alongside the one it collides with — and record a verdict. Your verdict is advisory. It is shown to the person in their review queue and approves nothing; ruling keep_both does not keep anything, it says the two do not conflict.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chunk_id: {
+          type: 'string',
+          description: 'The staged passage that was flagged, from autorag_list_pending.',
+        },
+        against_chunk_id: {
+          type: 'string',
+          description:
+            "The passage it was flagged against — the conflict entry's against_chunk_id.",
+        },
+        ruling: {
+          type: 'string',
+          enum: ['keep_new', 'keep_existing', 'keep_both', 'unresolved'],
+          description:
+            'keep_new: the flagged passage supersedes the older one. keep_existing: the older one is still correct. keep_both: they do not actually conflict. unresolved: the text alone does not settle it.',
+        },
+        reasoning: {
+          type: 'string',
+          description:
+            'One or two sentences the person will read while deciding. Name the specific claims that do or do not conflict — not the similarity score.',
+        },
+      },
+      required: ['chunk_id', 'against_chunk_id', 'ruling', 'reasoning'],
+    },
+    annotations: { readOnlyHint: false },
+    execute: (input: {
+      chunk_id: string;
+      against_chunk_id: string;
+      ruling: 'keep_new' | 'keep_existing' | 'keep_both' | 'unresolved';
+      reasoning: string;
+    }) => {
+      if (!input?.reasoning?.trim()) {
+        return toCallToolResult({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message:
+              'reasoning is required — it is the whole point of the ruling. The person reads it instead of comparing the two passages themselves.',
+          },
+        });
+      }
+      return proxy({
+        kind: 'adjudicate',
+        chunkId: input.chunk_id,
+        againstChunkId: input.against_chunk_id,
+        ruling: input.ruling,
+        reasoning: input.reasoning.trim(),
+      });
+    },
+  },
+  {
+    name: 'autorag_list_sources',
+    description:
+      'List the pages the person has kept material from, with how many passages of each are approved, awaiting review or discarded, and whether a source has been marked out of date. Use it to see what their memory actually covers before searching it, and to avoid re-capturing a page that is already in there.',
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true },
+    execute: () => proxy({ kind: 'listSources' }, 'sources'),
   },
   {
     name: 'autorag_memory_stats',

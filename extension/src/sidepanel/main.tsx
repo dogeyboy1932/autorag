@@ -33,12 +33,28 @@ async function ask<T>(request: Request): Promise<T | null> {
 const toActiveTab = <T,>(what: string): Promise<T | null> =>
   chrome.runtime.sendMessage({ type: 'autorag:to-active-tab', what });
 
+interface Conflict {
+  kind: string;
+  detail: string;
+  against_chunk_id: string | null;
+  against_text: string | null;
+  agent_verdict: { ruling: string; reasoning: string; ruled_at: string } | null;
+}
+
 interface Pending {
   chunk_id: string;
   text: string;
-  conflicts: { kind: string; detail: string }[];
+  conflicts: Conflict[];
   source: { url: string; title: string };
 }
+
+/** How an agent's ruling reads to the person who has to act on it. */
+const RULING_LABEL: Record<string, string> = {
+  keep_new: 'the new one supersedes the old',
+  keep_existing: 'the older one is still right',
+  keep_both: 'not actually a conflict',
+  unresolved: 'could not tell from the text',
+};
 
 interface Stats {
   approved: number;
@@ -376,6 +392,21 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
         <div key={i} className="conflict">
           <span className="badge">{c.kind.replace('_', ' ')}</span>
           <span>{c.detail}</span>
+          {/*
+            An agent's ruling, if one has been made. Rendered as a distinct block
+            rather than folded into the flag text: screening's line is a machine
+            nominating, this is a reading of both passages, and conflating them
+            would hide which of the two you are trusting.
+          */}
+          {c.agent_verdict && (
+            <div className="verdict">
+              <span className="badge verdict-badge">
+                agent: {RULING_LABEL[c.agent_verdict.ruling] ?? c.agent_verdict.ruling}
+              </span>
+              <span>{c.agent_verdict.reasoning}</span>
+              <span className="note">Advisory. You still decide.</span>
+            </div>
+          )}
         </div>
       ))}
 

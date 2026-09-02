@@ -69,7 +69,7 @@ it rather than a pile of everything you ever scrolled past.
 
 ## The part that is WebMCP
 
-While you browse, the extension registers four tools on `document.modelContext` of
+While you browse, the extension registers seven tools on `document.modelContext` of
 **every page you visit**:
 
 | Tool | What an agent does with it |
@@ -78,6 +78,14 @@ While you browse, the extension registers four tools on `document.modelContext` 
 | `autorag_remember_passage` | Keeps a passage it read on this page |
 | `autorag_recall` | Searches everything you have ever kept, from any site |
 | `autorag_memory_stats` | How much is kept, pending, rejected |
+| `autorag_list_pending` | Reads the review queue, with both sides of anything flagged |
+| `autorag_adjudicate_conflict` | Rules on a flagged pair — advisory, and it approves nothing |
+| `autorag_list_sources` | Sees what the memory already covers before adding to it |
+
+Approving and discarding are **deliberately absent**. Screening nominates, the agent
+adjudicates, you decide — and the third verb belongs to a person, so the only door to
+it is the side panel. An agent can rule that two passages do not really conflict; it
+cannot act on its own ruling.
 
 Measured: `wikipedia.org` and `example.com` have no `document.modelContext` at all.
 The extension gives them one. So an agent driving your browser finds *your* curated
@@ -96,17 +104,20 @@ and it is WebMCP doing it.
 pnpm ext:check
 ```
 
-Seven assertions against a real Brave with a throwaway profile: a third-party page
-gains a WebMCP surface, the four tools appear on it, a tool call reaches the corpus,
-highlighting offers to keep in place, an agent can deposit, **clicking Keep on a
-highlight actually stores it**, and the memory answers from an unrelated site.
+Eighteen assertions against a real browser with a throwaway profile: a third-party
+page gains a WebMCP surface, the seven tools appear on it, a tool call reaches the
+corpus, highlighting offers to keep in place, an agent can deposit, **clicking Keep on
+a highlight actually stores it**, the memory answers from an unrelated site, an agent
+reads the queue and rules on a flagged pair, **that ruling lands where the human will
+read it**, an approval tool is not reachable from the page, and the corpus can be
+managed.
 
 ---
 
 ## Known rough edges
 
 - `@mcp-b/global` registers a `page_heading` demo tool of its own, so that shows up
-  alongside the four above on every page. Not ours, not wanted, not yet removed.
+  alongside the seven above on every page. Not ours, not wanted, not yet removed.
 - The whole-page extractor is crude: `<article>`, else `<main>`, else the body with
   nav/header/footer/script stripped. It beats asking you to select 2000 words; it is
   not a Readability implementation.

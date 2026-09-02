@@ -17,8 +17,8 @@ They share one engine (`src/rag/`) and have different jobs. Neither is dead code
 |---|---|---|
 | Role | **the product** | the deployed tool host |
 | Capture | highlight → Keep · `Ctrl+Shift+S` · whole-page preview | agent calls `autorag_ingest_passage`; manual form as fallback |
-| Tools | 4, injected into **every page you visit** | 15, on its own page, both registration APIs |
-| Agent can curate | ✗ — recall and deposit only | ✓ — queue, adjudication, staleness, deletion |
+| Tools | 7, injected into **every page you visit** | 15, on its own page, both registration APIs |
+| Agent can curate | partly — reads the queue and adjudicates; cannot approve | ✓ — queue, adjudication, staleness, deletion |
 | Corpus | extension storage, outlives every tab | IndexedDB on its own origin |
 | Reached by | a desktop MCP client, via `pnpm bridge` | any agent that can visit a URL |
 
@@ -40,7 +40,7 @@ pnpm install
 # The product
 pnpm ext                  # build the extension
 #   brave://extensions → Developer mode → Load unpacked → extension/dist
-pnpm ext:check            # 13/13 against a real Brave, throwaway profile
+pnpm ext:check            # 18/18 against a real Brave, throwaway profile
 
 # The desktop bridge
 pnpm bridge               # serves http://localhost:3210 — leave the tab open
@@ -92,14 +92,16 @@ Every row is a command that produces the number, not an assertion.
 | Retrieval quality | `pnpm bench` | top-1 21/21 · no overclaim 3/3 · no withhold 25/25 |
 | Web app tool surface | `pnpm loop` | 15/15 on Brave; also verified on Chrome 151 |
 | Tool contract | `evals/RESULTS.md` | 11/11, five defects found and fixed by running it |
-| Extension end to end | `pnpm ext:check` | 13/13 |
+| Extension end to end | `pnpm ext:check` | 18/18 |
 | **Desktop agent** | `pnpm bridge` + `pnpm ext:relay` | **6/6** |
 | Extension origins | `node probes/extension-origin-check.mjs` | every extension context rejects; a web page works |
 
 `pnpm ext:check` covers the claims that matter: a third-party page gains a WebMCP surface
-it never had, the four memory tools appear on it, a highlight-and-click actually stores
-text, whole-page capture previews before storing, the corpus can be managed, and
-keep → approve → recall returns the passage with its source.
+it never had, the seven memory tools appear on it, a highlight-and-click actually stores
+text, whole-page capture previews before storing, the corpus can be managed,
+keep → approve → recall returns the passage with its source, an agent reads the queue and
+rules on a flagged pair, that ruling reaches the queue the human reads, and no approval
+tool is reachable from the page.
 
 ---
 
@@ -152,16 +154,16 @@ localhost is the one context that is neither. That is `extension/connector/`.
 
 **App-side, in priority order:**
 
-- [ ] **Give agents the curation loop on the extension.** This is the biggest gap and it
-      breaks a headline claim. `screen.ts` runs on every extension capture and conflicts
-      are stored and shown in the panel — but no agent can see the queue or rule on
-      anything, so *"screening nominates, the agent adjudicates, the human decides"* is
-      currently true only of the web app. Needs `autorag_list_pending`,
-      `autorag_adjudicate_conflict` and `autorag_list_sources` added to
-      `extension/src/content/webmcp.ts`, plus `adjudicate` in `extension/src/protocol.ts`
-      and `offscreen/main.ts`. The engine already supports all of it
-      (`annotateConflict` in `src/rag/store.ts`); copy the schemas from
-      `src/webmcp/tools/ingestion.ts`, which are already eval-hardened.
+- [x] **Agents have the curation loop on the extension** (2026-09-01). `autorag_list_pending`,
+      `autorag_adjudicate_conflict` and `autorag_list_sources` now sit on every page beside
+      the four capture tools, with `adjudicate` wired through `protocol.ts` and
+      `offscreen/main.ts` onto the existing `annotateConflict`. Three things worth knowing
+      before touching it: `listPending` carries the *opposing passage's text*, not just its
+      id, because an adjudicator that cannot read both passages cannot do the job; the panel
+      renders `agent_verdict` as its own block under the flag, since a verdict that lands
+      nowhere a human reads is D12 wearing a different hat; and **approve and reject are
+      deliberately absent** from the page surface — `ext:check` asserts their absence, so a
+      later "completeness" pass cannot quietly add them.
 - [ ] Strip `page_heading`, the demo tool `@mcp-b/global` registers on every page.
 - [ ] Verify the extension corpus survives a full browser restart. Never explicitly
       tested — `ext:check` uses a throwaway profile each run.
@@ -175,12 +177,18 @@ localhost is the one context that is neither. That is `extension/connector/`.
 - [ ] `SUBMISSION.md` — move the extension to the headline; it currently leads with the
       web app.
 
-**Blocked on the user** (`HUMAN-TASKS.md` has the detail):
+**Blocked on the user.** `HUMAN-TASKS.md` is now a feature-by-feature test plan rather
+than a task list — twelve features, each with what it is meant to do, what to do, and what
+"working" looks like. Two of its checks are the ones no automated run can reach:
 
-- [ ] Push. `gh` is authed as `dogeyboy1932`; must be **public** for the MIT licence to
-      show. `gh repo create autorag --public --source=. --remote=origin --push`
-- [ ] Use the extension for ten minutes and report what still costs more than one gesture.
-- [ ] Record the video, submit on Devpost.
+- [ ] Use the extension on real pages and report anything that costs more than one gesture,
+      happens silently, or leaves you unsure whether it worked.
+- [ ] Confirm the corpus survives a full browser restart (§7 below; every probe uses a
+      throwaway profile, so only real use tests this).
+
+Publishing, the video and the Devpost submission were dropped from that file by the user's
+instruction — *"all that matters now is ensuring the application works."* Push is still
+unrun and still the user's call: `gh repo create autorag --public --source=. --remote=origin --push`.
 
 **Deploy is NOT on the list.** It was justified solely by ChatGPT's in-app browser being
 the only shipping WebMCP consumer that can visit a URL but cannot run an extension. The
@@ -252,7 +260,7 @@ lib/webmcp/API-DELTA.md        17 verified findings. Highest-value doc in the re
 lib/tool-design/TOOL-CONTRACT.md
 autorag-build-plan.md          AD-5 supersedes AD-3. Read §2 above first.
 amendments.md                  A7 is current.
-HUMAN-TASKS.md                 what only the user can do
+HUMAN-TASKS.md                 the feature-by-feature test plan for a person
 MANUAL.md                      plain-language guide — written for the web app
 ```
 
@@ -262,9 +270,10 @@ MANUAL.md                      plain-language guide — written for the web app
 
 ```bash
 pnpm typecheck && pnpm build && pnpm ext
-pnpm bench                                  # 21/21, 3/3, 25/25
-pnpm ext:check                              # 13/13
+pnpm ext:check                              # 18/18
 pnpm bridge & pnpm ext:relay                # 6/6
+pnpm dev                                    # bench and loop both drive the app
+pnpm bench                                  # 21/21, 3/3, 25/25
 pnpm loop                                   # 15/15
 ```
 

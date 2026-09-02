@@ -57,8 +57,9 @@ database.
 
 The extension inverts it: you highlight, you keep, and capture costs one gesture where
 you already are. WebMCP's role moves from *the only way in* to *the reason the memory
-travels* — four tools registered on every page you visit, so any agent that speaks the
-standard finds your curated memory on whatever page it is already reading.
+travels* — seven tools registered on every page you visit, so any agent that speaks the
+standard finds your curated memory on whatever page it is already reading, and can help
+triage what screening flagged before any of it reaches you.
 
 **What it costs, stated plainly.** Tools published by an extension are invisible to any
 agent-browser that cannot run extensions — ChatGPT's in-app browser among them. That is

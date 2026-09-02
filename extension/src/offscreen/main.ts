@@ -18,6 +18,7 @@ import {
   countByStatus,
   decideChunks,
   deleteSourceCascade,
+  annotateConflict,
   setSourceStale,
   wipeAll,
 } from '@/src/rag/store';
@@ -164,17 +165,70 @@ async function handle(request: Request): Promise<unknown> {
       const chunks = await allChunks();
       const sources = await allSources();
       const byId = new Map(sources.map((s) => [s.id, s]));
+      const byChunk = new Map(chunks.map((c) => [c.id, c]));
       return chunks
         .filter((c) => c.status === 'pending')
         .map((c) => ({
           chunk_id: c.id,
           text: c.text,
-          conflicts: c.conflicts,
+          conflicts: c.conflicts.map((cf) => ({
+            kind: cf.kind,
+            detail: cf.detail,
+            against_chunk_id: cf.againstChunkId ?? null,
+            /*
+             * The passage this one was flagged against, carried along rather than
+             * merely named. Screening's `detail` reports which figures differ; only
+             * the claims around those figures say whether that is a disagreement,
+             * so an adjudicator that cannot read both passages cannot do the job it
+             * is being asked to do.
+             */
+            against_text: cf.againstChunkId
+              ? (byChunk.get(cf.againstChunkId)?.text.slice(0, 600) ?? null)
+              : null,
+            agent_verdict: cf.agentVerdict
+              ? {
+                  ruling: cf.agentVerdict.ruling,
+                  reasoning: cf.agentVerdict.reasoning,
+                  ruled_at: cf.agentVerdict.ruledAt,
+                }
+              : null,
+          })),
           source: {
             url: byId.get(c.sourceId)?.url ?? '',
             title: byId.get(c.sourceId)?.title ?? '',
           },
         }));
+    }
+
+    /*
+     * An agent ruling on a flagged pair. The verdict is *written onto the
+     * conflict*, never onto the chunk's status: adjudication decides whether two
+     * passages actually disagree, not whether either one is kept. The human still
+     * approves or discards in the panel, now with a sentence to read instead of
+     * two passages to compare.
+     */
+    case 'adjudicate': {
+      const updated = await annotateConflict(request.chunkId, request.againstChunkId, {
+        ruling: request.ruling,
+        reasoning: request.reasoning,
+        ruledAt: new Date().toISOString(),
+      });
+      if (!updated) throw new Error(`No staged passage with id ${request.chunkId}.`);
+
+      const matched = updated.conflicts.some((c) => c.againstChunkId === request.againstChunkId);
+      if (!matched) {
+        throw new Error(
+          `That passage has no recorded conflict against ${request.againstChunkId}. ` +
+            `Known: ${updated.conflicts.map((c) => c.againstChunkId).join(', ') || 'none'}.`,
+        );
+      }
+
+      record('done', `An agent ruled "${request.ruling.replace('_', ' ')}" on a flagged pair`);
+      return {
+        chunk_id: request.chunkId,
+        ruling: request.ruling,
+        message: 'Verdict recorded on the review queue. The human still decides whether to keep it.',
+      };
     }
 
     case 'listSources': {

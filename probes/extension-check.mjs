@@ -40,7 +40,7 @@ async function waitForTools(page) {
         const ctx = document.modelContext;
         if (!ctx) return false;
         const names = (await ctx.getTools()).map((t) => t.name);
-        return names.filter((n) => n.startsWith('autorag_')).length >= 4;
+        return names.filter((n) => n.startsWith('autorag_')).length >= 7;
       },
       { timeout: 30_000, polling: 250 },
     )
@@ -88,7 +88,7 @@ try {
 
   log(
     "the person's memory tools appear on that page",
-    surface.ours?.length === 4 && surface.ours.includes('autorag_recall'),
+    surface.ours?.length === 7 && surface.ours.includes('autorag_recall'),
     surface.ours?.join(', '),
   );
 
@@ -325,6 +325,121 @@ try {
     loop.error ?? `${loop.hits} passage(s), confidence ${loop.confidence}, cites ${loop.cites}`,
   );
 
+  /*
+   * The curation loop, driven entirely from a webpage's tool surface — the door an
+   * agent actually has. Screening deliberately over-flags, which is only affordable
+   * if something triages the nominations before they reach a person; that triage is
+   * what these three tools are for.
+   *
+   * Both halves are asserted, per HANDOFF rule 6: the ruling must come back from the
+   * call *and* be sitting on the queue afterwards, where the human will read it.
+   * A verdict that returns ok and lands nowhere is the exact shape of D12.
+   */
+  const call = (target) => async (name, args) =>
+    target.evaluate(
+      async (toolName, payload) => {
+        const ctx = document.modelContext;
+        const tools = await ctx.getTools();
+        const tool = tools.find((t) => t.name === toolName);
+        if (!tool) return { ok: false, error: { message: `${toolName} is not registered` } };
+        const raw = await ctx.executeTool(tool, JSON.stringify(payload));
+        const env = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return JSON.parse(env.content[0].text);
+      },
+      name,
+      args,
+    );
+  const onExample = call(page);
+  const onIana = call(other);
+
+  // A figure to disagree with, approved so it counts as established.
+  await onExample('autorag_remember_passage', {
+    text: 'The IANA special-use domain registry lists 3 names reserved for documentation, and has been stable since 1999. Anyone may use them in written examples without asking permission.',
+    title: 'Special-use domains',
+  });
+  await panel.evaluate(async () => {
+    const send = (req) =>
+      new Promise((res) =>
+        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'c', request: req }, res),
+      );
+    const staged = (await send({ kind: 'listPending' })).data ?? [];
+    if (staged.length) await send({ kind: 'approve', chunkIds: staged.map((p) => p.chunk_id) });
+  });
+
+  // The same claim, different numbers, from a different site — what a person
+  // reading two sources on one subject actually produces.
+  await onIana('autorag_remember_passage', {
+    text: 'The IANA special-use domain registry lists 5 names reserved for documentation, and has been stable since 2013. Anyone may use them in written examples without asking permission.',
+    title: 'Special-use domains (revised)',
+  });
+
+  const queue = await onIana('autorag_list_pending', { only_conflicted: true });
+  const flagged = queue?.pending?.[0];
+  const conflict = flagged?.conflicts?.[0];
+  log(
+    'an agent can read the review queue, with both sides of a flagged pair',
+    queue?.ok === true && !!conflict?.against_chunk_id && !!conflict?.against_text,
+    conflict
+      ? `${queue.total_count} flagged; "${conflict.kind}" carrying ${conflict.against_text.length} chars of the passage it collides with`
+      : `no flagged passage returned (${queue?.error?.message ?? 'queue empty'})`,
+  );
+
+  const ruled = conflict
+    ? await onIana('autorag_adjudicate_conflict', {
+        chunk_id: flagged.chunk_id,
+        against_chunk_id: conflict.against_chunk_id,
+        ruling: 'keep_new',
+        reasoning:
+          'Both describe the same registry; the 5 names and 2013 date supersede the older 3 and 1999.',
+      })
+    : { ok: false, error: { message: 'nothing was flagged to rule on' } };
+
+  const afterRuling = await onIana('autorag_list_pending', { only_conflicted: true });
+  const landed = afterRuling?.pending
+    ?.find((p) => p.chunk_id === flagged?.chunk_id)
+    ?.conflicts?.find((c) => c.agent_verdict);
+  log(
+    "an agent's ruling reaches the queue the human reads",
+    ruled?.ok === true && landed?.agent_verdict?.ruling === 'keep_new',
+    landed?.agent_verdict
+      ? `verdict "${landed.agent_verdict.ruling}" is on the queue: "${landed.agent_verdict.reasoning.slice(0, 60)}…"`
+      : `returned ok=${ruled?.ok} but nothing is on the queue (${ruled?.error?.message ?? ''})`,
+  );
+
+  /*
+   * And the half that actually matters to a person: the ruling has to be *on screen*
+   * in the review queue, not merely in storage. A verdict nobody reads is the same
+   * failure as a tool result nobody receives — D12 wearing a different hat.
+   */
+  await panel.reload({ waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 1500));
+  const shown = await panel.evaluate(() => {
+    const el = document.querySelector('.verdict');
+    return el ? el.textContent : null;
+  });
+  log(
+    'the person sees that ruling in their review queue',
+    typeof shown === 'string' && shown.includes('agent:') && shown.includes('You still decide'),
+    shown ? `panel shows "${shown.slice(0, 70)}…"` : 'no verdict rendered in the panel',
+  );
+
+  // Approving is deliberately not on the agent's menu; the panel is the only door.
+  const noApprove = await onIana('autorag_approve_pending', { chunk_ids: [flagged?.chunk_id] });
+  log(
+    'the agent cannot approve or discard — that stays with the person',
+    noApprove?.ok === false,
+    noApprove?.error?.message ?? 'an approval tool was reachable from the page',
+  );
+
+  const covered = await onIana('autorag_list_sources', {});
+  log(
+    'an agent can see what the memory already covers',
+    covered?.ok === true && covered.total_count >= 1 && !!covered.sources?.[0]?.url,
+    covered?.ok
+      ? `${covered.total_count} source(s), first: ${covered.sources[0].title}`
+      : (covered?.error?.message ?? 'no sources returned'),
+  );
+
   const managed = await panel.evaluate(async () => {
     const send = (req) =>
       new Promise((res) =>
@@ -348,7 +463,7 @@ try {
   log(
     'the panel can prove WebMCP is live on the tab',
     probe.webmcp?.present === true &&
-      probe.webmcp.tools.filter((t) => t.startsWith('autorag_')).length === 4,
+      probe.webmcp.tools.filter((t) => t.startsWith('autorag_')).length === 7,
     `${probe.webmcp?.tools?.filter((t) => t.startsWith('autorag_')).length ?? 0} autorag tools readable from the page`,
   );
 } catch (err) {

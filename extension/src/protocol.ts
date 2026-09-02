@@ -23,6 +23,13 @@ export type Request =
   | { kind: 'answer'; question: string }
   | { kind: 'stats' }
   | { kind: 'listPending' }
+  | {
+      kind: 'adjudicate';
+      chunkId: string;
+      againstChunkId: string;
+      ruling: 'keep_new' | 'keep_existing' | 'keep_both' | 'unresolved';
+      reasoning: string;
+    }
   | { kind: 'listSources' }
   | { kind: 'approve'; chunkIds: string[] }
   | { kind: 'reject'; chunkIds: string[]; reason: string }
