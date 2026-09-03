@@ -14,12 +14,17 @@
  * already knows.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { SCHEMA_SQL } from '@/src/rag/sync';
 import {
+  ASK_MODELS,
+  DEFAULT_ASK_MODEL,
   PREVIEW_PAGE,
   PREVIEW_SELECTION,
   envelope,
+  type AskSettings,
+  type CloudSettings,
   type Event,
   type Preview,
   type Request,
@@ -29,6 +34,23 @@ import {
 async function ask<T>(request: Request): Promise<T | null> {
   const res = await chrome.runtime.sendMessage(envelope('worker', request));
   return res?.ok ? (res.data as T) : null;
+}
+
+/**
+ * Same call, but keeps the reason it failed.
+ *
+ * `ask()` collapses every failure to `null`, which forced the caller to invent a
+ * cause — and the invented one was "check your key", offered identically for an
+ * expired key, an exhausted balance, a rate limit, a model the account cannot
+ * reach, and a dropped connection. Four of those five are not the key, and being
+ * told to check it sends you to re-paste something that was already correct.
+ */
+async function askDetailed<T>(
+  request: Request,
+): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  const res = await chrome.runtime.sendMessage(envelope('worker', request));
+  if (res?.ok) return { ok: true, data: res.data as T };
+  return { ok: false, error: String(res?.error ?? 'no response from the extension') };
 }
 
 const toActiveTab = <T,>(what: string): Promise<T | null> =>
@@ -88,8 +110,26 @@ function ModelStatus({ stats }: { stats: Stats | null }) {
  * Answers "are we actually using WebMCP" by asking the page, every two seconds.
  * If this says four tools, an agent on this tab can call them right now.
  */
+/**
+ * What an agent on this tab can actually see — and, when the answer is nothing,
+ * which of three quite different reasons applies.
+ *
+ * **WebMCP and capture are separate mechanisms, and conflating them is the bug this
+ * fixes.** The tools live on `document.modelContext` and come from a MAIN-world
+ * content script, so they exist only on ordinary web pages. Keeping things works
+ * through `chrome.runtime.sendMessage` from an isolated content script or an
+ * extension page, and needs no WebMCP at all. So Autorag's own PDF reader has zero
+ * tools and full capture, while a page can publish all seven and still refuse to
+ * give you a text selection. "No WebMCP" was reporting one of those as though it
+ * described the other.
+ */
 function WebmcpStatus() {
-  const [state, setState] = useState<{ present: boolean; tools: string[] } | null>(null);
+  const [state, setState] = useState<{
+    present: boolean;
+    scheme?: string;
+    tools: { name: string; description: string }[];
+  } | null>(null);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const read = async () =>
@@ -99,11 +139,57 @@ function WebmcpStatus() {
     return () => clearInterval(timer);
   }, []);
 
-  if (!state?.present) return <span className="chip">no WebMCP on this tab</span>;
-  const mine = state.tools.filter((t) => t.startsWith('autorag_'));
+  const mine = (state?.tools ?? []).filter((t) => t.name.startsWith('autorag_'));
+
+  /*
+   * Three absences that look identical and are not — and every one of them is
+   * about the *agent* surface only. The chip said "no WebMCP on this tab", which
+   * read as "Autorag does not work here" and twice sent someone looking for a
+   * fault. Nothing a person does in the panel depends on this number.
+   */
+  const why = !state
+    ? 'A browser page. No extension can run here — including this one.'
+    : state.scheme === 'chrome-extension:'
+      ? 'An extension page, so WebMCP cannot run here (it is refused on extension origins). Keeping still works — the PDF reader is one of these.'
+      : 'This tab has no Autorag in it — it was open before the extension loaded. Reload the page.';
+
   return (
-    <span className="chip ok" title={state.tools.join('\n')}>
-      {mine.length} tools live on this page
+    <span
+      className={`chip ${mine.length ? 'ok' : ''}`}
+      onClick={() => setOpen(!open)}
+      style={{ cursor: 'pointer', position: 'relative' }}
+      title="Click for detail"
+    >
+      {/* Short because the header is the narrowest row in the panel and this chip
+          sits at the end of it. The detail panel below carries the explanation. */}
+      {mine.length ? `agents: ${mine.length} tools` : 'agents: none'}
+      {open && (
+        <div className="chip-detail">
+          {mine.length ? (
+            <>
+              <p className="note">
+                What an <strong>agent</strong> driving this tab can call, with no integration
+                on the site&rsquo;s part. Your own panel &mdash; keeping, Recall, Ask &mdash;
+                works on every tab regardless, and never uses these.
+              </p>
+              {mine.map((t) => (
+                <p key={t.name} className="note">
+                  <strong>{t.name.replace('autorag_', '')}</strong>
+                  <br />
+                  {t.description.split('.')[0]}.
+                </p>
+              ))}
+              {state && state.tools.length > mine.length && (
+                <p className="note">
+                  Plus {state.tools.length - mine.length} the page publishes itself.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="note">{why}</p>
+          )}
+        </div>
+      )}
     </span>
   );
 }
@@ -139,6 +225,19 @@ function useShortcuts(): Record<string, string> {
 
 const openShortcuts = () => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
 
+/**
+ * Opens a PDF in Autorag's own reader, where the text is real DOM.
+ *
+ * This is the primary answer for a PDF, not the paste box below it: in the
+ * reader every capture path works the way it does on a web page — the Keep
+ * button, the shortcut, the review queue — because there is no longer anything
+ * special about the document being a PDF.
+ */
+const openInReader = (pdfUrl: string) =>
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL(`reader.html?src=${encodeURIComponent(pdfUrl)}`),
+  });
+
 function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
   const keys = useShortcuts();
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
@@ -161,6 +260,33 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
     };
   }, []);
 
+  /*
+   * The one thing that does work on a PDF: an empty editor, already pointed at
+   * the PDF's own URL, waiting for a paste.
+   *
+   * The old message said "select the text and use Keep", which is precisely the
+   * gesture that cannot work — the selection lives in Chrome's PDF plugin and no
+   * extension can read it. Saying so and stopping there leaves a dead end, so
+   * this opens the editor the preview flow already uses instead. Copying out of
+   * the viewer works fine; it is only *reading* the selection that is blocked.
+   * The passage is still stored against the PDF's URL, so recall cites the
+   * document rather than a stray paste.
+   */
+  function openPasteBox(url: string, title: string) {
+    setPreview({ text: '', title, url, isPdf: true });
+    setDraft('');
+    setNote(
+      <>
+        Chrome renders PDFs in a viewer no extension can read, so highlighting can&rsquo;t
+        reach Autorag.{' '}
+        <button className="linky" onClick={() => openInReader(url)}>
+          Read it in Autorag
+        </button>{' '}
+        and highlighting works normally — or copy the passage and paste it below.
+      </>,
+    );
+  }
+
   async function show(what: string) {
     setNote(null);
     const p = await toActiveTab<Preview>(what);
@@ -178,7 +304,7 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
         return setNote('Browser pages and the extensions gallery are off limits to every extension, including this one. Try an ordinary web page.');
       }
       if (/\.pdf(\?|#|$)/i.test(url)) {
-        return setNote("This is a PDF. The browser renders it in its own viewer, which no extension can read text out of. Select the text and use Keep, or copy it into the web app.");
+        return openPasteBox(url, tab?.title || url);
       }
       return setNote(
         <>
@@ -191,6 +317,15 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
         </>,
       );
     }
+    /*
+     * Before the length check, not after. A PDF answers this message — the
+     * content script does run on the tab — it just answers with an empty string,
+     * every time, however much is highlighted. Read as a length that made the
+     * panel say "nothing is highlighted" to someone looking at their own
+     * highlight, and it meant the PDF branch above almost never ran, since it
+     * only fires when the tab does not answer at all.
+     */
+    if (p.isPdf) return openPasteBox(p.url, p.title);
     if (p.text.trim().length < 50) {
       return setNote(
         what === PREVIEW_SELECTION
@@ -219,7 +354,7 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
 
   return (
     <section>
-      <h2>Reading now</h2>
+      <h2>This page</h2>
       <div className="card">
         <span className="src" title={tab?.url}>
           {tab?.title || tab?.url || 'no active tab'}
@@ -228,19 +363,27 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
         {preview ? (
           <>
             <p className="note">
-              {words(draft)} words · {draft.length} characters. Trim it before keeping if you
-              only want part.
+              {preview.isPdf && !draft.trim()
+                ? 'Nothing pasted yet.'
+                : `${words(draft)} words · ${draft.length} characters. Trim it before keeping if you only want part.`}
             </p>
             <textarea
               className="preview"
               value={draft}
+              placeholder={preview.isPdf ? 'Paste the passage from the PDF here…' : undefined}
               onChange={(e) => setDraft(e.target.value)}
             />
             <div className="row">
               <button className="primary" onClick={commit} disabled={busy || draft.trim().length < 50}>
                 {busy ? 'Keeping…' : `Keep ${words(draft)} words`}
               </button>
-              <button onClick={() => setPreview(null)} disabled={busy}>
+              <button
+                onClick={() => {
+                  setPreview(null);
+                  setNote(null);
+                }}
+                disabled={busy}
+              >
                 Cancel
               </button>
             </div>
@@ -254,11 +397,10 @@ function CurrentTab({ onCaptured }: { onCaptured: () => void }) {
               <button onClick={() => show(PREVIEW_SELECTION)}>Preview selection</button>
             </div>
             <p className="note" style={{ margin: '8px 0 0' }}>
-              Or highlight text on the page and click <strong>Keep</strong> — that one is
-              instant, no preview.{' '}
+              Or highlight anything and click <strong>Keep</strong>.{' '}
               {keys['keep-selection'] ? (
                 <>
-                  <kbd>{keys['keep-selection']}</kbd> does the same from the keyboard.
+                  <kbd>{keys['keep-selection']}</kbd> does it too.
                 </>
               ) : (
                 <>
@@ -302,7 +444,7 @@ interface Source {
  * searchable but rank lower and come back flagged, so the record of what you once
  * believed survives. Forgetting is permanent and asks twice.
  */
-function Corpus({ onChange }: { onChange: () => void }) {
+function Corpus({ onChange, count }: { onChange: () => void; count?: number }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -329,7 +471,10 @@ function Corpus({ onChange }: { onChange: () => void }) {
     <section>
       <h2>
         <button className="linky" onClick={() => setOpen(!open)}>
-          {open ? '▾' : '▸'} Manage corpus{sources.length > 0 && ` (${sources.length})`}
+          {open ? '▾' : '▸'} Sources{' '}
+          {/* From stats, not from `sources`: that list only loads when the section
+              is opened, so a closed one used to claim the corpus was empty. */}
+          <span className="soft">{count ?? '…'}</span>
         </button>
       </h2>
 
@@ -476,14 +621,17 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
   async function save() {
     setSaving(true);
     setErr(null);
-    const res = await ask({
+    const res = await askDetailed({
       kind: 'revisePending',
       chunkId: item.chunk_id,
       ...(draft.trim() !== item.text.trim() ? { text: draft.trim() } : {}),
       note,
     });
     setSaving(false);
-    if (!res) return setErr('Could not save that. The passage needs at least 50 characters.');
+    // The reason it refused, not a guess at one. "Needs 50 characters" was
+    // offered for every failure — including a passage that was already approved,
+    // where the length was fine and the advice was nonsense.
+    if (!res.ok) return setErr(res.error);
     setEditing(false);
     onDone();
   }
@@ -626,63 +774,718 @@ function ReviewCard({ item, onDone }: { item: Pending; onDone: () => void }) {
   );
 }
 
-/* ------------------------------------------------------------------ recall */
+/* ---------------------------------------------------------------- settings */
 
-function Recall() {
-  const [q, setQ] = useState('');
-  const [result, setResult] = useState<{
-    hits: { text: string; source: { url: string; title: string } }[];
-    confidence: string;
-    coverage_note: string;
-  } | null>(null);
-  const [busy, setBusy] = useState(false);
+/**
+ * Where the answering model lives. Read once, written on change.
+ *
+ * `chrome.storage.local`, never `sync`: an API key should not be copied to
+ * every browser signed into the same account as a side effect of typing it here.
+ */
+function useAskSettings(): [AskSettings, (next: AskSettings) => void] {
+  const [settings, setSettings] = useState<AskSettings>({ apiKey: '', model: DEFAULT_ASK_MODEL });
+  useEffect(() => {
+    void chrome.storage.local.get(['askApiKey', 'askModel']).then((v) =>
+      setSettings({
+        apiKey: String(v.askApiKey ?? ''),
+        model: String(v.askModel ?? DEFAULT_ASK_MODEL),
+      }),
+    );
+  }, []);
+  const save = (next: AskSettings) => {
+    setSettings(next);
+    void chrome.storage.local.set({ askApiKey: next.apiKey, askModel: next.model });
+  };
+  return [settings, save];
+}
 
-  async function run() {
-    if (!q.trim()) return;
-    setBusy(true);
-    setResult(await ask({ kind: 'answer', question: q.trim() }));
-    setBusy(false);
+/**
+ * The one place Autorag spends money, and the one place it sends anything off the
+ * device — so both facts are stated here rather than in a README nobody opens.
+ */
+function AnswerSettings({
+  settings,
+  save,
+}: {
+  settings: AskSettings;
+  save: (next: AskSettings) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const model = ASK_MODELS.find((m) => m.id === settings.model) ?? ASK_MODELS[0];
+
+  return (
+    <section>
+      <h2>
+        Answers <span className="soft">{settings.apiKey ? model.label : 'off'}</span>
+      </h2>
+      <div className="card">
+          <p className="note">
+            Without a key, Recall returns passages and nothing leaves your machine. With one,
+            Autorag also writes an answer from those passages — <strong>your question and the
+            passages it retrieved are sent to the model provider.</strong> Capture, review,
+            indexing and search stay local either way.
+          </p>
+          <div className="row">
+            <input
+              type="password"
+              placeholder={settings.apiKey ? 'Key saved — type to replace' : 'Anthropic API key'}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <button
+              onClick={() => {
+                save({ ...settings, apiKey: draft.trim() });
+                setDraft('');
+              }}
+              disabled={!draft.trim()}
+            >
+              Save
+            </button>
+            {settings.apiKey && (
+              <button className="danger" onClick={() => save({ ...settings, apiKey: '' })}>
+                Remove
+              </button>
+            )}
+          </div>
+          <div className="row">
+            {ASK_MODELS.map((m) => (
+              <button
+                key={m.id}
+                className={m.id === settings.model ? 'primary' : ''}
+                onClick={() => save({ ...settings, model: m.id })}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="note">
+            {model.label}: ${model.input}/M in, ${model.output}/M out. An answer over five
+            passages runs a few thousand tokens — well under a cent. Nothing calls the model
+            unless you ask a question.
+          </p>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------- cloud */
+
+const EMPTY_CLOUD: CloudSettings = { url: '', anonKey: '' };
+
+function useCloud(): [CloudSettings, (next: CloudSettings) => void] {
+  const [cloud, setCloud] = useState<CloudSettings>(EMPTY_CLOUD);
+  useEffect(() => {
+    void chrome.storage.local
+      .get('cloud')
+      .then((v) => setCloud((v.cloud as CloudSettings) ?? EMPTY_CLOUD));
+  }, []);
+  const save = (next: CloudSettings) => {
+    setCloud(next);
+    void chrome.storage.local.set({ cloud: next });
+  };
+  return [cloud, save];
+}
+
+/**
+ * Memory mode: this device, or this device and every other one you sign into.
+ *
+ * Local is the default and stays free, offline and private. Cloud is opt-in with
+ * the person's own project and their own bill — the same bargain as the answering
+ * key, and for the same reason: we are not billed for someone else's convenience,
+ * and their data is genuinely theirs.
+ */
+function Memory({
+  cloud,
+  save,
+  onSynced,
+}: {
+  cloud: CloudSettings;
+  save: (next: CloudSettings) => void;
+  onSynced: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState(cloud.url);
+  const [key, setKey] = useState(cloud.anonKey);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<React.ReactNode>(null);
+  const [showSql, setShowSql] = useState(false);
+
+  const signedIn = Boolean(cloud.accessToken);
+
+  async function connect(create: boolean) {
+    setBusy(create ? 'creating' : 'signing in');
+    setMsg(null);
+    const next = { ...cloud, url: url.trim(), anonKey: key.trim() };
+    const res = await askDetailed<{ accessToken: string; refreshToken: string; email: string }>({
+      kind: 'cloudSignIn',
+      cloud: next,
+      email: email.trim(),
+      password,
+      create,
+    });
+    setBusy(null);
+    if (!res.ok) return setMsg(res.error);
+    const connected = { ...next, ...res.data };
+    save(connected);
+    setPassword('');
+    // Push immediately rather than leaving it to a button. Signing in and seeing
+    // an empty table is indistinguishable from sync being broken.
+    setBusy('syncing');
+    const first = await askDetailed<{ pushed: number; pulled: number }>({
+      kind: 'sync',
+      cloud: connected,
+    });
+    setBusy(null);
+    setMsg(
+      first.ok
+        ? `Signed in and synced — ${first.data.pushed} row(s) up, ${first.data.pulled} down.`
+        : `Signed in, but the first sync failed: ${first.error}`,
+    );
+    onSynced();
+  }
+
+  async function sync() {
+    setBusy('syncing');
+    setMsg(null);
+    const res = await askDetailed<{ pulled: number; deleted: number }>({ kind: 'sync', cloud });
+    setBusy(null);
+    if (!res.ok) return setMsg(res.error);
+    setMsg(`Synced · ${res.data.pulled} new here, ${res.data.deleted} removed elsewhere.`);
+    onSynced();
   }
 
   return (
     <section>
-      <h2>Recall</h2>
-      <div className="row">
-        <input
-          placeholder="Ask what you've kept…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && run()}
-        />
-        <button onClick={run} disabled={busy}>
-          {busy ? '…' : 'Ask'}
-        </button>
-      </div>
-      {result && (
-        <>
+      <h2>
+        Memory <span className="soft">{signedIn ? cloud.email : 'this device'}</span>
+      </h2>
+      <div className="card">
           <p className="note">
-            <span className={`badge conf-${result.confidence}`}>{result.confidence}</span>{' '}
-            {result.coverage_note}
+            {signedIn
+              ? 'Your memory syncs to your Supabase project — sign in on another browser and it is there.'
+              : 'Local by default: free, offline, nothing leaves this machine. Connect a Supabase project and your memory follows you to any device you sign into.'}
           </p>
-          {result.hits.map((h, i) => (
-            <div key={i} className="card">
-              <a className="src" href={h.source.url} target="_blank" rel="noreferrer">
-                {h.source.title || h.source.url}
-              </a>
-              <p className="text">{h.text}</p>
+          {/*
+            Said before anything is uploaded, in these words, because it is a
+            larger step than the answering key: that sends a question and the few
+            passages it retrieved. This sends everything you have ever kept.
+          */}
+          {!signedIn && (
+            <p className="note bad">
+              Cloud mode uploads your <strong>whole corpus</strong>, including everything kept
+              before you switch — not just what a question retrieves.
+            </p>
+          )}
+          {!signedIn && (
+            <>
+              <div className="row">
+                <input placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
+              </div>
+              <div className="row">
+                <input placeholder="anon public key" value={key} onChange={(e) => setKey(e.target.value)} />
+              </div>
+              <div className="row">
+                <input placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <div className="row">
+                <input
+                  type="password"
+                  placeholder="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              <div className="row">
+                <button className="primary" onClick={() => void connect(false)} disabled={busy !== null}>
+                  {busy === 'signing in' ? '…' : 'Sign in'}
+                </button>
+                <button onClick={() => void connect(true)} disabled={busy !== null}>
+                  {busy === 'creating' ? '…' : 'Create account'}
+                </button>
+                <button className="linky inline" onClick={() => setShowSql(!showSql)}>
+                  {showSql ? 'hide' : 'first time? setup steps'}
+                </button>
+              </div>
+              {showSql && (
+                <>
+                  {/*
+                    Both of these were discovered by failing, which is the wrong way
+                    round. The account confusion produces "Invalid login
+                    credentials" — accurate and useless — and the confirmation
+                    default sends you to a localhost:3000 link that nothing serves.
+                  */}
+                  <p className="note">
+                    <strong>1.</strong> In Supabase → SQL editor, run the script below.
+                    <br />
+                    <strong>2.</strong> Authentication → Sign In / Providers → Email → turn
+                    off <strong>Confirm email</strong>. An extension has no address for a
+                    confirmation link to return to; left on, the link points at{' '}
+                    <code>localhost:3000</code> and fails.
+                    <br />
+                    <strong>3.</strong> Use <strong>Create account</strong> below with any
+                    email and password. This is a user <em>inside your project</em> — not
+                    your supabase.com login, which does not exist here.
+                  </p>
+                  <textarea className="preview" readOnly value={SCHEMA_SQL} style={{ height: 160 }} />
+                </>
+              )}
+            </>
+          )}
+          {signedIn && (
+            <div className="row">
+              <button className="primary" onClick={() => void sync()} disabled={busy !== null}>
+                {busy === 'syncing' ? 'Syncing…' : 'Sync now'}
+              </button>
+              <button
+                className="danger"
+                onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey })}
+              >
+                Sign out
+              </button>
             </div>
-          ))}
+          )}
+          {msg && <p className="note">{msg}</p>}
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ recall */
+
+/**
+ * One search result, editable in place.
+ *
+ * The Edit button lives here rather than only in the review queue because this is
+ * where you *notice*. A passage that captured a cookie banner or clipped a
+ * sentence looks fine until it comes back in a search, and at that moment the only
+ * previous option was to forget the whole source and keep it again.
+ *
+ * Editing an approved passage returns it to the review queue — approval means a
+ * person vouched for what it said, so changing the text withdraws that. The note
+ * below says so before you start typing, not after you save.
+ */
+function Hit({
+  n,
+  hit,
+  onEdited,
+}: {
+  n: number;
+  hit: { chunk: { id?: string; text: string }; source: { url: string; title: string } };
+  /** `gone` is true when the passage left the corpus, so the caller can drop it. */
+  onEdited: (gone: boolean) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [reason, setReason] = useState('');
+  const [draft, setDraft] = useState(hit.chunk.text);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  /**
+   * Removes one passage from the corpus without touching the rest of its source.
+   *
+   * Previously the only way was to forget the whole page, which threw away every
+   * other passage kept from it to remove one. The reason is optional and, like a
+   * discard from the review queue, is replayed if the same material comes back —
+   * so a thing you rejected once tells you why the next time you nearly keep it.
+   */
+  async function discard() {
+    setSaving(true);
+    setErr(null);
+    const res = await askDetailed({
+      kind: 'reject',
+      chunkIds: [hit.chunk.id ?? ''],
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    });
+    setSaving(false);
+    if (!res.ok) return setErr(res.error);
+    setDiscarding(false);
+    onEdited(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    const res = await askDetailed({
+      kind: 'revisePending',
+      chunkId: hit.chunk.id ?? '',
+      text: draft.trim(),
+    });
+    setSaving(false);
+    if (!res.ok) return setErr(res.error);
+    setEditing(false);
+    // An edit sends the passage back to the review queue, so it leaves the corpus
+    // too — until you approve it again.
+    onEdited(true);
+  }
+
+  return (
+    <div className="card">
+      <a className="src" href={hit.source.url} target="_blank" rel="noreferrer">
+        {/* Numbered to match the [1], [2] citations in the answer above. */}
+        [{n}] {hit.source.title || hit.source.url}
+      </a>
+      {editing ? (
+        <>
+          <textarea className="preview" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <p className="note">
+            Saving sends this back to <strong>To review</strong> — it was approved as it
+            reads now, and changing it withdraws that.
+          </p>
+          <div className="row">
+            <button
+              className="primary"
+              onClick={save}
+              disabled={saving || draft.trim() === hit.chunk.text.trim()}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={() => {
+                setDraft(hit.chunk.text);
+                setEditing(false);
+                setErr(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : discarding ? (
+        <>
+          <p className="text">{hit.chunk.text}</p>
+          <input
+            autoFocus
+            placeholder="Why not? Optional — replayed if this comes back"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void discard()}
+          />
+          <div className="row">
+            <button className="danger" onClick={discard} disabled={saving}>
+              {saving ? 'Discarding…' : 'Discard this passage'}
+            </button>
+            <button onClick={() => setDiscarding(false)} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text">{hit.chunk.text}</p>
+          <div className="row">
+            <button className="linky inline" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            <button className="linky inline" onClick={() => setDiscarding(true)}>
+              Discard
+            </button>
+          </div>
         </>
       )}
-    </section>
+      {err && <p className="note bad">{err}</p>}
+    </div>
+  );
+}
+
+interface RecallResult {
+  answer?: string;
+  hits: { chunk: { id?: string; text: string }; source: { url: string; title: string } }[];
+  confidence: string;
+  coverage_note: string;
+  tokens?: { input: number; output: number };
+  images_sent?: number;
+  /** Present when a follow-up was rewritten before retrieval. */
+  searched_for?: string;
+}
+
+/** One exchange, kept only while Remember is on. */
+interface Exchange {
+  question: string;
+  result: RecallResult;
+}
+
+/**
+ * A conversation, not a form.
+ *
+ * This was a text input, two buttons, an answer block and a list of passages
+ * stacked under it — every part the same weight, and the passages pushing the next
+ * question further off screen with each turn. Three things were wrong with that:
+ * the thread vanished when the panel closed, the sources competed with the answer
+ * for the same vertical space, and nothing about it read like talking to anything.
+ *
+ * Now: the transcript scrolls, the composer is pinned to the bottom, and the
+ * sources for the current answer live in a drawer at the foot of the pane — one
+ * line when shut, a sheet when open. The thread survives closing the panel.
+ */
+function Recall({ settings }: { settings: AskSettings }) {
+  const [q, setQ] = useState('');
+  const [thread, setThread] = useState<Exchange[]>([]);
+  const [remember, setRemember] = useState(false);
+  const [spend, setSpend] = useState({ input: 0, output: 0 });
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<'search' | 'ask' | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * The thread outlives the panel. A side panel closes whenever you click the
+   * toolbar icon or switch windows, and losing a conversation to that is
+   * indistinguishable from the product forgetting on purpose — which is the one
+   * thing this product must never appear to do.
+   */
+  useEffect(() => {
+    void chrome.storage.local.get(['thread', 'remember', 'spend']).then((v) => {
+      if (Array.isArray(v.thread)) setThread(v.thread as Exchange[]);
+      if (typeof v.remember === 'boolean') setRemember(v.remember);
+      if (v.spend) setSpend(v.spend as { input: number; output: number });
+      setLoaded(true);
+    });
+  }, []);
+  useEffect(() => {
+    if (loaded) void chrome.storage.local.set({ thread, remember, spend });
+  }, [thread, remember, spend, loaded]);
+
+  const last = thread[thread.length - 1];
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [thread.length, busy]);
+
+  async function run(generate: boolean) {
+    if (!q.trim()) return;
+    setBusy(generate ? 'ask' : 'search');
+    setErr(null);
+    const question = q.trim();
+    /*
+     * History only travels when Remember is on. Off, the model has never seen the
+     * previous question — which is what keeps every answer traceable to the
+     * passages beneath it rather than to something it said three turns ago.
+     */
+    const history = remember
+      ? thread.flatMap((t) => [
+          { role: 'user' as const, content: t.question },
+          { role: 'assistant' as const, content: t.result.answer ?? '' },
+        ])
+      : [];
+    const res = await askDetailed<RecallResult>(
+      generate ? { kind: 'ask', question, settings, history } : { kind: 'answer', question },
+    );
+    setBusy(null);
+    if (!res.ok) return setErr(res.error);
+    setThread((prev) => [...prev, { question, result: res.data }]);
+    setQ('');
+    setSourcesOpen(false);
+    if (res.data.tokens) {
+      setSpend((prev) => ({
+        input: prev.input + res.data.tokens!.input,
+        output: prev.output + res.data.tokens!.output,
+      }));
+    }
+  }
+
+  function clear() {
+    setThread([]);
+    setSpend({ input: 0, output: 0 });
+    setErr(null);
+    setSourcesOpen(false);
+  }
+
+  return (
+    <div className="chat">
+      <div className="transcript">
+        {thread.length === 0 && !busy && (
+          <div className="hello">
+            <h2>Ask your memory</h2>
+            <p className="note">
+              Everything you have kept, and nothing else. Answers cite the page each claim
+              came from, and say so plainly when you never kept anything on the subject.
+            </p>
+          </div>
+        )}
+
+        {thread.map((t, i) => (
+          <div key={i} className="turn">
+            <p className="q">{t.question}</p>
+            <div className="a">
+              {t.result.answer ? (
+                <p className="text">{t.result.answer}</p>
+              ) : (
+                <p className="note">
+                  {t.result.hits.length} passage{t.result.hits.length === 1 ? '' : 's'} found.
+                  Open sources below.
+                </p>
+              )}
+              {t.result.searched_for && (
+                <p className="meta">searched for &ldquo;{t.result.searched_for}&rdquo;</p>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {busy && (
+          <div className="turn">
+            <p className="q">{q}</p>
+            <div className="a">
+              <p className="note">{busy === 'ask' ? 'Reading your passages…' : 'Searching…'}</p>
+            </div>
+          </div>
+        )}
+        {err && <p className="note bad">{err}</p>}
+        <div ref={endRef} />
+      </div>
+
+      {/*
+        Sources at the foot of the pane rather than under the answer. Under it they
+        pushed the next question off screen and competed with the thing you asked
+        for; here they are one line until you want them.
+      */}
+      {last && (
+        <div className={sourcesOpen ? 'drawer open' : 'drawer'}>
+          <button className="drawer-bar" onClick={() => setSourcesOpen(!sourcesOpen)}>
+            <span className="caret" />
+            {last.result.hits.length} source{last.result.hits.length === 1 ? '' : 's'}
+            {last.result.images_sent ? ` · ${last.result.images_sent} image read` : ''}
+            <span className={`badge conf-${last.result.confidence}`}>
+              {last.result.confidence}
+            </span>
+          </button>
+          {sourcesOpen && (
+            <div className="drawer-body">
+              <p className="note">{last.result.coverage_note}</p>
+              {last.result.hits.map((h, i) => (
+                <Hit
+                  key={h.chunk.id ?? i}
+                  n={i + 1}
+                  hit={h}
+                  /*
+                   * Update this turn in place. The old handler re-ran the search,
+                   * which in a form appended nothing and in a conversation appends
+                   * a whole new turn — so discarding a source looked like it did
+                   * nothing while quietly starting another exchange.
+                   */
+                  onEdited={(gone) =>
+                    setThread((prev) =>
+                      prev.map((t, ti) =>
+                        ti !== prev.length - 1
+                          ? t
+                          : {
+                              ...t,
+                              result: {
+                                ...t.result,
+                                hits: gone
+                                  ? t.result.hits.filter((x) => x.chunk.id !== h.chunk.id)
+                                  : t.result.hits,
+                              },
+                            },
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="composer">
+        <div className="row">
+          <input
+            placeholder="Ask your memory…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && run(Boolean(settings.apiKey))}
+          />
+          <button onClick={() => run(false)} disabled={busy !== null} title="Passages only, local and free">
+            Search
+          </button>
+          <button
+            className="primary"
+            onClick={() => run(true)}
+            disabled={busy !== null || !settings.apiKey}
+            title={settings.apiKey ? 'Write an answer from the passages' : 'Add a key in Settings'}
+          >
+            Ask
+          </button>
+        </div>
+        <div className="composer-meta">
+          <label>
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => {
+                setRemember(e.target.checked);
+              }}
+            />
+            Remember
+          </label>
+          <span className="spacer" />
+          {thread.length > 0 && (
+            <>
+              <span>
+                {thread.length} turn{thread.length === 1 ? '' : 's'}
+                {spend.input + spend.output > 0 &&
+                  ` · ${(spend.input + spend.output).toLocaleString()} tokens`}
+              </span>
+              <button className="linky inline" onClick={clear}>
+                Clear
+              </button>
+            </>
+          )}
+          {!settings.apiKey && <span>Search only — add a key in Settings</span>}
+        </div>
+      </div>
+    </div>
   );
 }
 
 /* --------------------------------------------------------------------- app */
 
+/**
+ * Three tabs, split by what you are doing rather than by what the code does.
+ *
+ * Everything used to be one column: capture, queue, search, model settings, cloud
+ * settings and an activity log, all stacked and all visible. Every section looked
+ * the same weight, so the panel read as a list of controls to work through rather
+ * than a place with a few things you might want.
+ *
+ *   Ask       a question and its answer, with the passages it used
+ *   Library   what comes in and what is kept: this page, the queue, search
+ *   Settings  the two things you configure once, plus the activity log
+ *
+ * The badge on Library is the only thing that pulls for attention, and only when
+ * something is actually waiting.
+ */
+type Tab = 'ask' | 'library' | 'settings';
+
+/** When cloud sync last succeeded, or what went wrong. */
+function SyncStatus() {
+  const [state, setState] = useState<{ at?: number; error?: string }>({});
+  useEffect(() => {
+    const read = () =>
+      void chrome.storage.local
+        .get(['lastSyncAt', 'lastSyncError'])
+        .then((v) => setState({ at: v.lastSyncAt as number, error: v.lastSyncError as string }));
+    read();
+    const timer = setInterval(read, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (state.error) return <span className="leaves">Sync failed — {state.error}</span>;
+  if (!state.at) return <span>Cloud connected · not synced yet</span>;
+  const secs = Math.round((Date.now() - state.at) / 1000);
+  const ago = secs < 60 ? `${secs}s` : `${Math.round(secs / 60)}m`;
+  return <span>Synced {ago} ago</span>;
+}
+
 function App() {
+  const [tab, setTab] = useState<Tab>('library');
   const [pending, setPending] = useState<Pending[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [settings, saveSettings] = useAskSettings();
+  const [cloud, saveCloud] = useCloud();
 
   const refresh = useCallback(async () => {
     const [p, s] = await Promise.all([
@@ -699,6 +1502,12 @@ function App() {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  const tabs: { id: Tab; label: string; badge?: number }[] = [
+    { id: 'ask', label: 'Ask' },
+    { id: 'library', label: 'Library', badge: pending.length },
+    { id: 'settings', label: 'Settings' },
+  ];
+
   return (
     <div className="app">
       <header>
@@ -709,30 +1518,78 @@ function App() {
         </div>
       </header>
 
-      <p className="note">
-        {stats
-          ? `${stats.approved} kept · ${stats.pending} to review · ${stats.rejected} discarded · ${stats.source_count} sources`
-          : 'reading corpus…'}
-        <br />
-        Stored in this extension, on this machine. Nothing is uploaded.
-      </p>
+      <nav className="tabs" role="tablist">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            className={tab === t.id ? 'tab on' : 'tab'}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.badge ? <span className="pill">{t.badge}</span> : null}
+          </button>
+        ))}
+      </nav>
 
-      <CurrentTab onCaptured={refresh} />
+      {/*
+        All three panes stay mounted and the inactive ones are hidden, rather than
+        rendered conditionally. Unmounting is what made switching tabs wipe the Ask
+        pane — the question, the streamed answer and the whole remembered
+        conversation went with the component. Scroll position in Library survives
+        for the same reason.
+      */}
+      <div className={tab === 'ask' ? 'pane' : 'pane off'}>
+        <Recall settings={settings} />
+      </div>
 
-      <section>
-        <h2>To review {pending.length > 0 && <span className="pill">{pending.length}</span>}</h2>
-        {pending.length === 0 ? (
-          <p className="empty">
-            Nothing waiting. Highlight something on any page, or preview this one above.
-          </p>
-        ) : (
-          pending.map((item) => <ReviewCard key={item.chunk_id} item={item} onDone={refresh} />)
-        )}
-      </section>
+      <div className={tab === 'library' ? 'pane' : 'pane off'}>
+          <CurrentTab onCaptured={refresh} />
+          <hr />
+          <section>
+            <h2>
+              Waiting for you {pending.length > 0 && <span className="pill">{pending.length}</span>}
+            </h2>
+            {pending.length === 0 ? (
+              <p className="empty">All clear. Highlight anything on any page to keep it.</p>
+            ) : (
+              pending.map((item) => <ReviewCard key={item.chunk_id} item={item} onDone={refresh} />)
+            )}
+          </section>
+          <hr />
+          <Corpus onChange={refresh} count={stats?.source_count} />
+      </div>
 
-      <Recall />
-      <Corpus onChange={refresh} />
-      <Activity />
+      <div className={tab === 'settings' ? 'pane' : 'pane off'}>
+        <AnswerSettings settings={settings} save={saveSettings} />
+        <hr />
+        <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
+        <hr />
+        <Activity />
+      </div>
+
+      {/*
+        The footer carries the counts and the privacy line on every tab. Both are
+        things you want to be able to glance at without navigating, and the second
+        one is the most consequential sentence in the product — it must not be a
+        tab you can forget to visit.
+      */}
+      <footer>
+        {/* Sync is a background job with no surface of its own, so "did it work?"
+            had no answer short of opening Supabase. */}
+        {cloud.accessToken && <SyncStatus />}
+        <span>
+          {stats
+            ? `${stats.approved} kept · ${stats.pending} to review · ${stats.source_count} sources`
+            : 'reading corpus…'}
+        </span>
+        <span className={settings.apiKey ? 'leaves' : ''}>
+          {settings.apiKey
+            ? 'Kept on this machine · only answers leave it'
+            : 'Kept on this machine · nothing is uploaded'}
+        </span>
+      </footer>
     </div>
   );
 }

@@ -2,4 +2,21 @@
 <meta charset="utf-8" />
 <title>Autorag</title>
 <link rel="stylesheet" href="sidepanel.css" />
-<body><div id="root"></div><script type="module" src="sidepanel.js"></script></body>
+<body><div id="root"></div><script type="module" src="sidepanel.js"></script>
+<!--
+  Live reload for `pnpm ext:watch`. `build-id.txt` only exists in a watch build,
+  so the fetch 404s in production and this quietly does nothing — no flag to
+  remember, no dev code that can ship active.
+-->
+<script>
+  (async () => {
+    let seen = null;
+    setInterval(async () => {
+      try {
+        const id = await (await fetch(chrome.runtime.getURL('build-id.txt'))).text();
+        if (seen && id !== seen) location.reload();
+        seen = id;
+      } catch {}
+    }, 1000);
+  })();
+</script></body>

@@ -1,8 +1,15 @@
+/*
+ * Warmer and softer than the GitHub-dark palette this started from, which read
+ * as a developer tool: pure-grey borders on near-black, everything the same
+ * weight, nothing inviting. Slightly blue-lifted surfaces, lower-contrast
+ * borders and a friendlier accent do most of that work without a redesign.
+ */
 :root {
-  color-scheme: light dark;
-  --bg: #0d1117; --panel: #161b22; --border: #30363d;
-  --fg: #e6edf3; --muted: #8b949e; --accent: #4493f8;
-  --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  color-scheme: dark;
+  --bg: #14161c; --panel: #1c2029; --panel-2: #232833; --border: #2c313c;
+  --fg: #e9edf4; --muted: #98a1b3; --accent: #6aa6ff;
+  --ok: #56c877; --warn: #e0aa3e; --bad: #f2706a;
+  --radius: 12px;
 }
 * { box-sizing: border-box; }
 /*
@@ -14,21 +21,65 @@
  * matter how narrow the panel got.
  */
 body { margin: 0; background: var(--bg); color: var(--fg); overflow-wrap: anywhere;
-  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
-.app { padding: 12px; display: grid; gap: 18px; min-width: 0; }
+  font: 13.5px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+/* `height`, not `min-height`: with a minimum, a tall pane grows the page and the
+   composer and footer get pushed below the fold instead of staying pinned. */
+.app { padding: 0; display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+header { padding: 14px 16px 10px; }
+
+/* One tab bar, sticky, so switching never requires scrolling back up. */
+.tabs { display: flex; gap: 2px; padding: 0 16px; position: sticky; top: 0; z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--border); }
+.tab { background: none; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; padding: 9px 12px; color: var(--muted); font-weight: 500;
+  display: flex; align-items: center; gap: 6px; }
+.tab:hover:not(.on) { background: none; color: var(--fg); }
+.tab.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* The gap between sections is the spacing; `hr` marks where one job ends and the
+   next begins, which stacked sections alone never made obvious. */
+.pane { padding: 18px 16px 24px; display: flex; flex-direction: column; gap: 24px;
+  flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
+/* The chat manages its own three scroll zones, so the pane must not add a fourth. */
+.pane:has(.chat) { overflow: hidden; }
+.pane hr { margin: 0; border: none; border-top: 1px solid var(--border); }
+
+/* Counts and the privacy line, on every tab — the second is the most consequential
+   sentence in the product and must not be somewhere you can forget to look. */
+footer { position: sticky; bottom: 0; background: var(--bg);
+  border-top: 1px solid var(--border); padding: 9px 16px;
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 11.5px; color: var(--muted); }
+footer .leaves { color: var(--warn); }
+.chips { display: flex; gap: 8px; align-items: center; min-width: 0; }
 section, .card { min-width: 0; }
 header { display: flex; align-items: baseline; justify-content: space-between;
   flex-wrap: wrap; gap: 4px 8px; }
 h1 { font-size: 15px; margin: 0; letter-spacing: -0.01em; }
-h2 { font-size: 12px; margin: 0 0 8px; color: var(--muted);
-  text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+/* Sentence case at readable size. Uppercase micro-headings are what made every
+   section look like a numbered step in an instruction sheet. */
+h2 { font-size: 13px; margin: 0 0 10px; color: var(--fg);
+  letter-spacing: -0.01em; font-weight: 600; }
 .counts { font-size: 11.5px; color: var(--muted); }
 .card { background: var(--panel); border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+  border-radius: var(--radius); padding: 12px 13px; margin-bottom: 10px; }
 .src { color: var(--accent); font-size: 12px; text-decoration: none;
   display: block; margin-bottom: 6px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-.text { margin: 0 0 8px; font-size: 12.5px; max-height: 7.5em; overflow: hidden; }
+/*
+ * `max-height: 7.5em; overflow: hidden` kept review cards compact, and silently
+ * clipped anything longer — with no scrollbar, no fade, nothing to indicate there
+ * was more. Applied to a generated answer it was badly wrong: a ten-step reply
+ * arrived complete and showed three steps, which read as the model stopping early
+ * and sent us hunting through max_tokens, effort and the prompt for a fault that
+ * was never there.
+ *
+ * Passages stay capped, because a card is a summary you click into — but the cap
+ * now scrolls, so the content is reachable and visibly present.
+ */
+.text { margin: 0 0 8px; font-size: 12.5px; max-height: 9em; overflow-y: auto; }
+/* An answer is the thing you asked for. It is never abbreviated. */
+.card.answer .text { max-height: none; overflow: visible; }
 .conflict { font-size: 11.5px; color: var(--muted); margin-bottom: 6px;
   display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
 /* An agent's ruling sits under the flag it answers, on its own line, so the
@@ -43,17 +94,36 @@ h2 { font-size: 12px; margin: 0 0 8px; color: var(--muted);
 .conf-low { border-color: var(--muted); color: var(--muted); }
 .pill { background: var(--accent); color: #fff; border-radius: 999px;
   padding: 0 6px; font-size: 10.5px; margin-left: 4px; }
-.row { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 6px read as cramped — inputs and buttons sat almost touching, which is most of
+   why the panel felt like a form to fill in rather than something to use. The
+   vertical gap matters as much: stacked `.row`s had none at all, so four inputs
+   in the cloud form ran together as one block. */
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row + .row { margin-top: 10px; }
 .row > button { flex: 0 1 auto; }
+/* Anything following an input or textarea gets air, whatever wraps it. */
+.card > input + *, .card > textarea + * { margin-top: 10px; }
 input { flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
-button { background: var(--panel); color: var(--fg); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--muted); }
-button:disabled { opacity: .5; cursor: default; }
-.primary { background: rgba(68,147,248,.15); border-color: rgba(68,147,248,.4); color: var(--accent); }
-.danger { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.4); color: var(--bad); }
-.note { font-size: 11.5px; color: var(--muted); margin: 0 0 8px; }
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; }
+input::placeholder { color: var(--muted); opacity: .8; }
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
+  outline-offset: -1px; border-color: transparent; }
+button { background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 500; cursor: pointer;
+  transition: background .12s, border-color .12s; }
+button:hover:not(:disabled) { background: var(--border); border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+/* The primary action should read as the obvious next move, not as one more
+   equally weighted option in a row of identical grey rectangles. */
+.primary { background: var(--accent); border-color: var(--accent); color: #10131a;
+  font-weight: 600; }
+.primary:hover:not(:disabled) { background: #82b6ff; border-color: #82b6ff; }
+.danger { background: transparent; border-color: rgba(242,112,106,.35); color: var(--bad); }
+.danger:hover:not(:disabled) { background: rgba(242,112,106,.12); border-color: var(--bad); }
+.note { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+.note:last-child { margin-bottom: 0; }
+/* The card's own children need rhythm, not just the rows inside it. */
+.card > .note + .row, .card > .row + .note, .card > p + .row { margin-top: 10px; }
 .warn { color: var(--warn); }
 .empty { font-size: 12px; color: var(--muted); margin: 0; }
 kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-width: 2px;
@@ -61,11 +131,15 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 
 .chips { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
 .chip { border: 1px solid var(--border); color: var(--muted); border-radius: 999px;
-  padding: 1px 7px; font-size: 10.5px; white-space: nowrap; }
+  padding: 1px 7px; font-size: 10.5px; white-space: nowrap;
+  /* `nowrap` alone overflows a narrow panel: the chip cannot wrap and would not
+     shrink, so it ran off the right edge. Ellipsis instead of clipping — a
+     truncated label still reads, a half-visible one does not. */
+  min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .chip.ok { border-color: var(--ok); color: var(--ok); }
 .chip.warn { border-color: var(--warn); color: var(--warn); }
 .chip.bad { border-color: var(--bad); color: var(--bad); }
-.note-input { width: 100%; margin-bottom: 6px; }
+.note-input { width: 100%; margin: 10px 0; }
 /* The picture, so a person describing an image is looking at it rather than
    remembering it. Errors are hidden by the handler: a hotlink-blocked image
    should not leave a broken-icon hole in the review card. */
@@ -77,14 +151,148 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
   border-radius: 6px; padding: 8px; font: 12px/1.5 ui-monospace, monospace;
   margin-bottom: 8px; }
 .feed { display: grid; gap: 5px; }
-.event { display: grid; grid-template-columns: 8px 62px 1fr; gap: 6px;
+.event { display: grid; grid-template-columns: 8px auto 1fr; gap: 6px;
   align-items: baseline; font-size: 11.5px; color: var(--muted); }
-.when { font: 10.5px ui-monospace, monospace; opacity: .7; }
+/* `62px` was too narrow for "12:56:40 PM", so every row wrapped onto two lines
+   and the feed was twice the height it needed. `auto` plus nowrap fits it. */
+.when { font: 10.5px ui-monospace, monospace; opacity: .7; white-space: nowrap; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
 .dot.working { background: var(--warn); }
 .dot.done { background: var(--ok); }
 .dot.failed { background: var(--bad); }
-.linky { background: none; border: none; padding: 0; color: var(--muted);
-  font: inherit; text-transform: uppercase; letter-spacing: .06em;
-  font-weight: 600; font-size: 12px; cursor: pointer; }
+.linky { background: none; border: none; padding: 0; color: var(--fg);
+  font: inherit; letter-spacing: -0.01em;
+  font-weight: 600; font-size: 13px; cursor: pointer; text-align: left; }
 .linky:hover { color: var(--fg); }
+/* `.linky` doubles as a section-disclosure heading, which is why it is uppercase.
+   Inline inside a row it read as another heading rather than an action. */
+.linky.inline { text-transform: none; letter-spacing: 0; font-weight: 400;
+  font-size: 12px; text-decoration: underline; }
+
+/*
+ * The generated answer, distinguished from the passages beneath it. The border is
+ * doing real work: an answer a model composed and a passage a person chose to keep
+ * are different kinds of thing, and they must not read as one continuous list.
+ */
+.card.answer {
+  border-left: 3px solid #1f6feb;
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.card.answer .text {
+  white-space: pre-wrap;
+}
+
+.note.bad {
+  color: #b62324;
+}
+
+/* The tool list behind the WebMCP chip. Anchored to it, above everything. */
+.chip-detail {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  cursor: default;
+}
+
+.chip-detail .note { margin: 0 0 8px; }
+.chip-detail .note:last-child { margin-bottom: 0; }
+
+/* A disclosure heading's current value, carried at lower weight so the row reads
+   as "Memory: this device" rather than as two competing labels. */
+.soft { color: var(--muted); font-weight: 400; }
+
+/* Activity is reference, not a headline: dimmer and quieter than everything above. */
+.event { opacity: .85; }
+
+/* Hidden, not unmounted — see the comment in App. */
+.pane.off { display: none; }
+
+/* Collapsible groups: sources under an answer, and earlier turns of a
+   conversation. Closed, a fold is one line; that is the point. */
+.fold { border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); overflow: hidden; }
+.fold > summary { cursor: pointer; list-style: none; padding: 10px 13px;
+  display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 12.5px; }
+.fold > summary::-webkit-details-marker { display: none; }
+/* A disclosure triangle drawn in CSS, so open/closed reads without a library. */
+.fold > summary::before { content: ''; width: 0; height: 0; flex: none;
+  border-left: 5px solid var(--muted); border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent; transition: transform .12s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold > summary:hover { background: var(--panel-2); }
+.fold > summary::marker { content: ''; }
+.fold > :not(summary) { margin-left: 13px; margin-right: 13px; }
+.fold > :last-child { margin-bottom: 12px; }
+.fold[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+
+/* A folded turn shows its question; the answer is the body. */
+.fold.turn > summary { color: var(--muted); font-weight: 400; }
+.fold.turn > summary:hover { color: var(--fg); }
+.fold.turn .text { max-height: none; }
+
+/* ---------------------------------------------------------------- the chat */
+/*
+ * Three fixed zones rather than one long scroll: transcript, sources drawer,
+ * composer. The composer never moves, so the next question is always in the same
+ * place no matter how long the conversation gets.
+ */
+.chat { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 0; }
+.pane:has(.chat) { padding: 0; gap: 0; }
+
+.transcript { flex: 1; min-height: 0; overflow-y: auto;
+  padding: 18px 16px 8px; display: flex; flex-direction: column; gap: 20px; }
+
+.hello { margin: auto 0; text-align: center; padding: 0 8px; }
+.hello h2 { font-size: 16px; margin: 0 0 6px; }
+.hello .note { max-width: 34ch; margin: 0 auto; }
+
+/* A turn is a question and its answer, visibly one unit. */
+.turn { display: flex; flex-direction: column; gap: 8px; }
+.turn .q { margin: 0; align-self: flex-end; max-width: 88%;
+  background: var(--accent); color: #10131a; font-weight: 500;
+  padding: 8px 12px; border-radius: 14px 14px 4px 14px; font-size: 13px; }
+.turn .a { background: var(--panel); border: 1px solid var(--border);
+  border-radius: 4px 14px 14px 14px; padding: 11px 13px; }
+.turn .a .text { margin: 0; max-height: none; overflow: visible;
+  white-space: pre-wrap; font-size: 13px; line-height: 1.65; }
+.turn .meta { margin: 8px 0 0; font-size: 11px; color: var(--muted); font-style: italic; }
+
+/* Sources: one line at the foot of the pane until you want them. */
+.drawer { border-top: 1px solid var(--border); background: var(--bg); flex: none;
+  display: flex; flex-direction: column; min-height: 0; }
+.drawer.open { max-height: 55%; }
+.drawer-bar { width: 100%; background: none; border: none; border-radius: 0;
+  padding: 10px 16px; display: flex; align-items: center; gap: 8px;
+  color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.drawer-bar:hover { background: var(--panel); border-color: transparent; }
+.drawer-bar .badge { margin-left: auto; }
+.drawer-bar .caret { width: 0; height: 0; flex: none;
+  border-left: 5px solid var(--muted); border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent; transition: transform .12s; }
+.drawer.open .drawer-bar .caret { transform: rotate(90deg); }
+.drawer-body { overflow-y: auto; padding: 0 16px 14px; min-height: 0; }
+
+/* The composer never moves. */
+.composer { flex: none; border-top: 1px solid var(--border);
+  background: var(--panel); padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 8px; }
+.composer .row { gap: 8px; flex-wrap: nowrap; }
+.composer input[type='text'], .composer input:not([type]) { flex: 1; }
+.composer-meta { display: flex; align-items: center; gap: 10px;
+  font-size: 11.5px; color: var(--muted); }
+.composer-meta .spacer { flex: 1; }
+.composer-meta label { display: flex; align-items: center; gap: 5px; cursor: pointer;
+  white-space: nowrap; }
+.composer-meta input[type='checkbox'] { flex: none; width: auto; margin: 0; }
