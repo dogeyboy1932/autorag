@@ -291,11 +291,13 @@ const tools = [
  * without the tag; it only helps when we lose the race, which is why it is not
  * the primary check.
  */
-async function pageOwnsSurface(ctx: { getTools?(): Promise<{ name?: string }[]> }) {
+async function pageOwnsSurface() {
   if (document.querySelector('meta[name="autorag-owns-modelcontext"]')) return true;
-  if (!ctx.getTools) return false;
+  // Required by the spec, but absent from older polyfill builds, so it is
+  // checked rather than assumed.
+  if (!document.modelContext?.getTools) return false;
   try {
-    return (await ctx.getTools()).some((t) => t?.name?.startsWith('autorag_'));
+    return (await document.modelContext.getTools()).some((t) => t?.name?.startsWith('autorag_'));
   } catch {
     return false;
   }
@@ -303,22 +305,17 @@ async function pageOwnsSurface(ctx: { getTools?(): Promise<{ name?: string }[]> 
 
 async function register() {
   // The polyfill installs itself on import, but defers to a native surface when
-  // the browser already has one, so this reads whichever is in play.
-  const ctx = (
-    document as unknown as {
-      modelContext?: {
-        registerTool(t: unknown): Promise<void>;
-        getTools?(): Promise<{ name?: string }[]>;
-      };
-    }
-  ).modelContext;
-  if (!ctx?.registerTool) return;
+  // the browser already has one, so this is whichever is in play. Written out
+  // rather than resolved through a helper: `document.modelContext.registerTool`
+  // is the API, and this is the file that makes the claim about using it on
+  // every page.
+  if (!document.modelContext?.registerTool) return;
 
-  if (await pageOwnsSurface(ctx)) return;
+  if (await pageOwnsSurface()) return;
 
   for (const tool of tools) {
     try {
-      await ctx.registerTool(tool);
+      await document.modelContext.registerTool(tool as never);
     } catch (err) {
       /*
        * Never swallow this. An empty catch here cost a debugging cycle: one tool

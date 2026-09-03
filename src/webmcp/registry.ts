@@ -104,7 +104,31 @@ export async function registerGroup(
       },
     };
     try {
-      await ctx.registerTool(wrapped as never, { signal: controller.signal });
+      /*
+       * The registration call, written out on the document path.
+       *
+       * `getModelContext()` has already resolved a surface, so
+       * `ctx.registerTool(...)` alone would serve both and is one line shorter.
+       * But then `document.modelContext.registerTool(...)` — the call the WebMCP
+       * spec names, and the one every reader will grep for — appears nowhere in
+       * the repo, and its absence reads as though we reach the API through some
+       * wrapper instead of using it. This is the branch that actually executes
+       * under Chrome's native surface and under the polyfill's default install.
+       *
+       * The second arm exists only for `navigator.modelContext` (D1), and is not
+       * dead code: older polyfill builds still install there.
+       *
+       * The whole tool object goes up, not the four fields the spec's example
+       * shows. `title` and `annotations` are part of these tools and picking out
+       * `{ name, description, inputSchema, execute }` would quietly drop them.
+       */
+      if (document.modelContext) {
+        await document.modelContext.registerTool(wrapped as never, {
+          signal: controller.signal,
+        });
+      } else {
+        await ctx.registerTool(wrapped as never, { signal: controller.signal });
+      }
     } catch (err) {
       // D13: `registerTool` rejects with AbortError if its signal fires while the
       // call is still pending — which is exactly what a re-registration of the
