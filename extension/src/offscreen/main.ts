@@ -28,8 +28,10 @@ import {
 } from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
-import '@mcp-b/global';
 import { isEnvelope, type Event, type Request, type Response } from '../protocol';
+import { askModel, standaloneQuery } from './answer';
+import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
+import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
 import type { Conflict } from '@/src/types';
 
 /*
@@ -121,6 +123,111 @@ async function handle(request: Request): Promise<unknown> {
         hits: r.hits,
         confidence: confidenceOf(r.hits, request.query, r.docs),
         unmatched_terms: r.unmatchedTerms,
+      };
+    }
+
+    /*
+     * Retrieve, then have a model write the answer. The one request that leaves
+     * the device — and the reason Autorag no longer needs someone else's agent to
+     * close its own loop.
+     *
+     * Retrieval is not reimplemented: it is the same `search()` the 'answer' case
+     * below uses, so what the model is shown is exactly what the passage list
+     * shows, and a person can check one against the other.
+     */
+    /*
+     * Sync is the only request that can take minutes — a first upload of a full
+     * corpus — so every stage lands in the activity feed. Silence during a long
+     * upload is indistinguishable from a hang, which is the same reason the model
+     * download reports a percentage.
+     */
+    case 'sync': {
+      const { url, anonKey, accessToken, refreshToken, email } = request.cloud;
+      if (!accessToken || !refreshToken) throw new Error('Not signed in to the cloud memory.');
+      record('working', 'Syncing memory');
+      const result = await syncWithRenewal(
+        { url, anonKey, accessToken, refreshToken, email },
+        (message) => record('working', message),
+      );
+      record(
+        'done',
+        `Synced — ${result.pulled} new from other devices, ${result.deleted} removed elsewhere`,
+      );
+      emitCorpusChange();
+      return result;
+    }
+
+    case 'cloudSignIn': {
+      const cfg = { url: request.cloud.url, anonKey: request.cloud.anonKey };
+      const session = request.create
+        ? await signUp(cfg, request.email, request.password)
+        : await signIn(cfg, request.email, request.password);
+      record('done', `Signed in to cloud memory as ${request.email}`);
+      return session;
+    }
+
+    case 'ask': {
+      record('working', `Asking about "${request.question.slice(0, 40)}"`);
+      const history = request.history ?? [];
+      /*
+       * Retrieve on a query that can stand alone. On turn one that is the question
+       * itself; on a follow-up it is the question with its pronouns resolved from
+       * the transcript, because "what about the second one?" embeds to nothing.
+       */
+      const query = await standaloneQuery(request.question, history, request.settings);
+      if (query !== request.question) record('working', `Searching for "${query.slice(0, 50)}"`);
+      const r = await search(query, { k: 5 });
+      const confidence = confidenceOf(r.hits, query, r.docs);
+      const note = coverageNote(r.hits, r.totalCandidates, confidence, r.unmatchedTerms, query);
+      const passages = r.hits.map((h) => ({
+        text: h.chunk.text,
+        url: h.source.url,
+        title: h.source.title,
+        captured: h.source.ingestedAt,
+        // An image passage's source *is* the image, so the model can be shown the
+        // thing itself rather than only what someone wrote about it.
+        ...(h.source.tags?.includes('image') ? { imageUrl: h.source.url } : {}),
+      }));
+
+      let answer = '';
+      let tokens = { input: 0, output: 0 };
+      let imagesSent = 0;
+      try {
+        ({ imagesSent } = await askModel(
+          request.question,
+          passages,
+          confidence,
+          note,
+          request.settings,
+          (chunk) => {
+            answer += chunk;
+          },
+          history,
+          (u) => {
+            tokens = { input: tokens.input + u.input, output: tokens.output + u.output };
+          },
+        ));
+      } catch (err) {
+        /*
+         * Never let the key reach the activity feed. The message comes from the
+         * provider and could in principle echo the request, so what is recorded is
+         * the shape of the failure, not its text.
+         */
+        record('failed', 'The answering model could not be reached');
+        throw err;
+      }
+      record('done', `Answered from ${passages.length} passage${passages.length === 1 ? '' : 's'}`);
+      return {
+        question: request.question,
+        answer,
+        hits: r.hits,
+        confidence,
+        coverage_note: note,
+        tokens,
+        // Reported so "the model did not read the picture" and "the model read it
+        // and answered badly" stop looking identical from the panel.
+        images_sent: imagesSent,
+        ...(query !== request.question ? { searched_for: query } : {}),
       };
     }
 
@@ -255,8 +362,8 @@ async function handle(request: Request): Promise<unknown> {
     case 'revisePending': {
       const before = await getChunk(request.chunkId);
       if (!before) throw new Error(`No staged passage with id ${request.chunkId}.`);
-      if (before.status !== 'pending') {
-        throw new Error('Only passages still awaiting review can be edited.');
+      if (before.status === 'rejected') {
+        throw new Error('A discarded passage cannot be edited — its text is what future screening matches against.');
       }
 
       const text = request.text?.trim();
@@ -381,22 +488,145 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 
 /* ------------------------------------------------------------------------- */
-/* The bridge out: attempted here, and it does not work. See API-DELTA D17.    */
+/* Sync that happens on its own.                                               */
 /* ------------------------------------------------------------------------- */
 
 /*
- * This document is the obvious home for a desktop bridge: it owns the corpus, it
- * outlives the tabs, and its `chrome-extension://` origin is a secure context
- * allowed to hold a `ws://127.0.0.1` socket (see the manifest CSP).
+ * A "Sync now" button was the whole of cloud sync for one build, and it was not
+ * enough by a long way. Signing in did nothing until you pressed it, keeping
+ * something did nothing until you pressed it, and the natural conclusion from
+ * watching an empty `chunks` table was that sync was broken rather than that it
+ * had never been asked to run.
  *
- * It cannot host one. `document.modelContext.registerTool()` rejects with
- * `SecurityError` on an extension-page origin — measured, all three tools, every
- * time. So the WebMCP surface can only live on ordinary web pages, which is
- * where `content/webmcp.ts` puts it.
+ * So every corpus change schedules a push. Debounced, because approving five
+ * passages is five change events and one worthwhile upload; and errors are
+ * recorded rather than swallowed, because a silent failure here looks exactly
+ * like a memory that is safely backed up and is not.
+ */
+const SYNC_DEBOUNCE_MS = 2500;
+/* Continuous activity would otherwise keep pushing the debounce back forever —
+   approving a long queue one card at a time is exactly that shape. */
+const SYNC_MAX_WAIT_MS = 15_000;
+let firstPendingChange = 0;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let syncing = false;
+
+async function cloudSettings() {
+  const v = (await chrome.storage.local.get('cloud')) as {
+    cloud?: { url: string; anonKey: string; accessToken?: string; refreshToken?: string; email?: string };
+  };
+  const c = v.cloud;
+  if (!c?.url || !c.anonKey || !c.accessToken || !c.refreshToken) return null;
+  return c;
+}
+
+/**
+ * Runs a sync, renewing the session first if the old one has expired.
  *
- * That leaves the desktop path genuinely blocked for normal browsing: the page
- * that *can* register tools cannot reach the relay over https (D16), and the
- * document that *can* reach the relay cannot register tools (D17). Recorded here
- * rather than deleted, because the next person to reach for this will otherwise
- * spend the same afternoon on it.
+ * A Supabase access token lasts about an hour. Nothing ever renewed it, so sync
+ * worked for an hour and then failed forever with `JWT expired` — which reads
+ * like a broken integration rather than a token that simply aged out, and left
+ * the only apparent fix as signing in again by hand.
+ *
+ * The refresh token is long-lived, so one retry covers it. If the refresh itself
+ * fails the session is genuinely gone and the error says so.
+ */
+async function syncWithRenewal(
+  c: NonNullable<Awaited<ReturnType<typeof cloudSettings>>>,
+  onProgress?: (m: string) => void,
+) {
+  const cfg = { url: c.url, anonKey: c.anonKey };
+  const session = { accessToken: c.accessToken!, refreshToken: c.refreshToken!, email: c.email ?? '' };
+  try {
+    return await syncNow(cfg, session, onProgress);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!/jwt|expired|invalid token|401/i.test(message)) throw err;
+    record('working', 'Session expired — renewing');
+    const renewed = await refreshSession(cfg, session);
+    await chrome.storage.local.set({
+      cloud: { ...c, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
+    });
+    return await syncNow(cfg, renewed, onProgress);
+  }
+}
+
+async function autoSync() {
+  if (syncing) return;
+  const c = await cloudSettings();
+  if (!c) return; // Local-only. Nothing to do and nothing to report.
+  syncing = true;
+  try {
+    const result = await syncWithRenewal(c);
+    // Written whether or not anything moved, so the panel can say when it last
+    // succeeded. A sync that runs and reports nothing is indistinguishable from a
+    // sync that never ran.
+    await chrome.storage.local.set({ lastSyncAt: Date.now(), lastSyncError: '' });
+    if (result.pulled || result.deleted) {
+      record('done', `Synced — ${result.pulled} new, ${result.deleted} removed elsewhere`);
+      emitCorpusChange();
+    }
+  } catch (err) {
+    // Loud on purpose. The failure mode this replaces was a table that stayed
+    // empty while everything looked fine.
+    const message = err instanceof Error ? err.message : String(err);
+    record('failed', `Cloud sync failed — ${message}`);
+    await chrome.storage.local.set({ lastSyncError: message });
+  } finally {
+    syncing = false;
+  }
+}
+
+function scheduleSync() {
+  const now = Date.now();
+  if (!firstPendingChange) firstPendingChange = now;
+  if (now - firstPendingChange >= SYNC_MAX_WAIT_MS) {
+    if (syncTimer) clearTimeout(syncTimer);
+    syncTimer = null;
+    firstPendingChange = 0;
+    void autoSync();
+    return;
+  }
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    firstPendingChange = 0;
+    void autoSync();
+  }, SYNC_DEBOUNCE_MS);
+}
+
+onCorpusChange(scheduleSync);
+// And once at startup, so a browser you have just signed into pulls what the
+// others have kept without you asking.
+void autoSync();
+
+/* ------------------------------------------------------------------------- */
+/* The bridge out: measured, and then removed on purpose.                      */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * This document briefly held a WebSocket to a local relay, so a desktop MCP client
+ * could reach the corpus with no tab open. It worked — an extension page *can*
+ * hold `ws://127.0.0.1`, negotiate `webmcp-discovery.v1` and complete the
+ * handshake, which means the D16/D17 intersection never required the bridge tab
+ * that was built around it (API-DELTA **D19-b**).
+ *
+ * It was removed anyway, for two reasons.
+ *
+ * The product one: supplying a coding agent with URLs and pasted text is easy, so
+ * a desktop client reaching this memory was thin value against its cost. The
+ * generative half now lives in the panel (`answer.ts`), which needs no relay, no
+ * MCP client and no external agent at all.
+ *
+ * The operational one, which is the more interesting warning: **a relay process
+ * can wedge**, holding its listening socket while accepting nothing. Port
+ * discovery then queues a connection on every sweep and never gets one back — the
+ * accept backlog on a dead relay was observed climbing past 25, and the stalled
+ * offscreen document took the extension's capture path down with it. A background
+ * connection attempt on a fixed schedule is not free when the thing it probes is
+ * broken rather than absent.
+ *
+ * The seven WebMCP tools are untouched: they live on `document.modelContext` of
+ * every page via `content/webmcp.ts`, and an agent driving the browser still finds
+ * this memory wherever it is looking. Only the desktop path is gone.
  */
