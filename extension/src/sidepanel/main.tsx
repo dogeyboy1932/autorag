@@ -910,7 +910,16 @@ function Memory({
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<React.ReactNode>(null);
-  const [showSql, setShowSql] = useState(false);
+  /*
+   * Open by default for anyone who has not configured a project yet.
+   *
+   * These steps used to be behind a link, which is the wrong default: the person
+   * who needs them is precisely the person who does not yet know they exist, and
+   * without running the script first, Sign in can only fail. Someone returning to
+   * a configured panel gets it collapsed, because for them it is noise.
+   */
+  const [showSql, setShowSql] = useState(!cloud.url);
+  const [copied, setCopied] = useState(false);
 
   const signedIn = Boolean(cloud.accessToken);
 
@@ -1005,7 +1014,7 @@ function Memory({
                   {busy === 'creating' ? '…' : 'Create account'}
                 </button>
                 <button className="linky inline" onClick={() => setShowSql(!showSql)}>
-                  {showSql ? 'hide' : 'first time? setup steps'}
+                  {showSql ? 'hide setup steps' : 'first time? setup steps'}
                 </button>
               </div>
               {showSql && (
@@ -1029,6 +1038,23 @@ function Memory({
                     your supabase.com login, which does not exist here.
                   </p>
                   <textarea className="preview" readOnly value={SCHEMA_SQL} style={{ height: 160 }} />
+                  {/*
+                    A copy button rather than leaving people to select 30 lines
+                    inside a scrolling textarea, where missing the last line
+                    produces a project that is silently short an index.
+                  */}
+                  <div className="row">
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(SCHEMA_SQL).then(() => {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        });
+                      }}
+                    >
+                      {copied ? 'Copied' : 'Copy SQL'}
+                    </button>
+                  </div>
                 </>
               )}
             </>
