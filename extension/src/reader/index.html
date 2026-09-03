@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Autorag reader</title>
+<link rel="stylesheet" href="pdfjs/pdf_viewer.css" />
+<link rel="stylesheet" href="reader.css" />
+<body>
+  <header id="bar">
+    <span id="name">Loading…</span>
+    <span class="spacer"></span>
+    <span id="pages"></span>
+    <button id="out" type="button">Zoom out</button>
+    <button id="in" type="button">Zoom in</button>
+    <a id="original" href="#" target="_blank" rel="noreferrer">Open in Chrome’s viewer</a>
+  </header>
+  <div id="status" hidden></div>
+  <div id="viewer" class="pdfViewer"></div>
+  <script type="module" src="reader.js"></script>
+</body>

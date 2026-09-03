@@ -8,7 +8,7 @@
  */
 
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,7 @@ const moduleEntries = {
   background: resolve(here, 'src/background.ts'),
   offscreen: resolve(here, 'src/offscreen/main.ts'),
   sidepanel: resolve(here, 'src/sidepanel/main.tsx'),
+  reader: resolve(here, 'src/reader/main.ts'),
 };
 
 const contentEntries = {
@@ -110,13 +111,59 @@ function copyRelay() {
   console.log('vendored the relay embed into dist/relay/');
 }
 
+/*
+ * Vendor PDF.js.
+ *
+ * Same MV3 rule as the two above — nothing may be fetched from a CDN — but with
+ * more moving parts than either, because PDF.js resolves four kinds of asset at
+ * *runtime* from URLs the caller supplies:
+ *
+ *   pdf.worker.mjs   the parser. Must be a real file: it is loaded as a Worker,
+ *                    so it cannot be bundled into the reader with esbuild.
+ *   cmaps/           character maps for CJK and other non-Latin encodings.
+ *   standard_fonts/  the 14 PDF base fonts, for documents that embed no font.
+ *   wasm/            the JBIG2 / OpenJPEG decoders (scanned pages) and qcms
+ *                    (colour management).
+ *   iccs/            the default CMYK profile.
+ *
+ * Skipping any of them does not fail loudly. The reader comes up, renders, and
+ * quietly produces a blank page or a wall of tofu for the documents that needed
+ * the missing piece — which looks like a broken reader rather than a missing
+ * file. So all of it ships, and `pnpm ext:check` opens a real PDF.
+ *
+ * Unlike onnxruntime-web this is a direct dependency with no `exports` map, so
+ * plain resolution works and the pnpm-store walk above is not needed.
+ */
+function copyPdfJs() {
+  const require = createRequire(import.meta.url);
+  const from = dirname(require.resolve('pdfjs-dist/package.json'));
+  const dest = resolve(out, 'pdfjs');
+  mkdirSync(dest, { recursive: true });
+
+  // Minified: the reader ships it, and the sourcemap it would otherwise want is
+  // a megabyte of no use inside a packed extension.
+  cpSync(resolve(from, 'build/pdf.worker.min.mjs'), resolve(dest, 'pdf.worker.mjs'));
+  // The stylesheet the TextLayer's DOM is written against. Vendored whole rather
+  // than transcribed: the text layer positions every span with CSS custom
+  // properties and transforms, and hand-copying that math is how selection ends
+  // up subtly misaligned with what is drawn.
+  cpSync(resolve(from, 'web/pdf_viewer.css'), resolve(dest, 'pdf_viewer.css'));
+  for (const dir of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) {
+    cpSync(resolve(from, dir), resolve(dest, dir), { recursive: true });
+  }
+  console.log('vendored pdf.js (worker, cmaps, standard_fonts, wasm, iccs) into dist/pdfjs/');
+}
+
 function copyStatic() {
   copyOnnxRuntime();
   copyRelay();
+  copyPdfJs();
   cpSync(resolve(here, 'manifest.json'), resolve(out, 'manifest.json'));
   cpSync(resolve(here, 'src/sidepanel/index.html'), resolve(out, 'sidepanel.html'));
   cpSync(resolve(here, 'src/sidepanel/sidepanel.css'), resolve(out, 'sidepanel.css'));
   cpSync(resolve(here, 'src/offscreen/index.html'), resolve(out, 'offscreen.html'));
+  cpSync(resolve(here, 'src/reader/index.html'), resolve(out, 'reader.html'));
+  cpSync(resolve(here, 'src/reader/reader.css'), resolve(out, 'reader.css'));
 }
 
 const configs = [
@@ -124,13 +171,32 @@ const configs = [
   { ...options, entryPoints: contentEntries, format: 'iife' },
 ];
 
+/*
+ * Live reload, watch builds only.
+ *
+ * An extension page cannot hot-reload itself the way a dev server does, and
+ * pressing reload after every edit is the wrong loop when you are iterating on
+ * layout. So a watch build stamps a build id into `dist/`, and the side panel
+ * polls it once a second and reloads when it changes (see `sidepanel/index.html`).
+ *
+ * Production builds write nothing and the poller is not injected: this must not
+ * ship, and it must not be something anyone has to remember to strip.
+ */
+function stampBuild() {
+  writeFileSync(resolve(out, 'build-id.txt'), String(Date.now()));
+}
+
 if (watch) {
   for (const config of configs) {
     const ctx = await esbuild.context(config);
-    await ctx.watch();
+    await ctx.watch({});
   }
   copyStatic();
+  stampBuild();
+  // esbuild's watcher rebuilds the bundles; the stamp is what the panel sees.
+  setInterval(stampBuild, 1000);
   console.log(`watching — load unpacked from ${out}`);
+  console.log('live reload on: open chrome-extension://<id>/sidepanel.html as a tab');
 } else {
   await Promise.all(configs.map((config) => esbuild.build(config)));
   copyStatic();

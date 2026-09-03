@@ -21,6 +21,14 @@ import {
   type Preview,
   type Request,
 } from '../protocol';
+import { isPdfTab, keep, tabTitle, toast, watchSelection } from './keep-ui';
+
+/*
+ * The highlight → Keep affordance lives in `keep-ui.ts` because the PDF reader
+ * needs the same one on an extension page, where content scripts do not run.
+ * Here it keeps its default source: the page this script was injected into.
+ */
+watchSelection();
 
 /* ---------- 2. bridge: page tool calls -> service worker -> offscreen ---------- */
 
@@ -80,134 +88,6 @@ function connectRelay() {
   el.remove(); // it has executed by now; do not leave furniture in the page
 }
 connectRelay();
-
-/* ---------- 1. human path: the selection affordance ---------- */
-
-const BUTTON_ID = 'autorag-keep-button';
-let button: HTMLButtonElement | null = null;
-
-function removeButton() {
-  button?.remove();
-  button = null;
-}
-
-function showButton(rect: DOMRect, text: string) {
-  removeButton();
-  button = document.createElement('button');
-  button.id = BUTTON_ID;
-  button.textContent = 'Keep';
-  Object.assign(button.style, {
-    position: 'absolute',
-    // Above the selection, nudged left so the cursor is not covering it.
-    top: `${window.scrollY + rect.top - 38}px`,
-    left: `${window.scrollX + rect.left}px`,
-    zIndex: '2147483647',
-    padding: '6px 12px',
-    font: '500 13px/1 ui-sans-serif, system-ui, sans-serif',
-    color: '#fff',
-    background: '#1f6feb',
-    border: 'none',
-    borderRadius: '6px',
-    boxShadow: '0 2px 10px rgba(0,0,0,.28)',
-    cursor: 'pointer',
-  } satisfies Partial<CSSStyleDeclaration>);
-
-  button.addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection alive
-  button.addEventListener('click', async () => {
-    button!.textContent = 'Keeping…';
-    button!.disabled = true;
-    const res = await chrome.runtime.sendMessage(
-      envelope('worker', {
-        kind: 'ingest',
-        text,
-        sourceUrl: location.href,
-        title: document.title || location.hostname,
-      }),
-    );
-    if (!button) return;
-    if (res?.ok) {
-      const conflicts = (res.data as { conflicts?: unknown[] })?.conflicts ?? [];
-      button.textContent = conflicts.length ? `Kept · ${conflicts.length} to review` : 'Kept';
-      button.style.background = conflicts.length ? '#9e6a03' : '#1a7f37';
-    } else {
-      button.textContent = 'Failed';
-      button.style.background = '#b62324';
-      button.title = String(res?.error ?? 'unknown error');
-    }
-    setTimeout(removeButton, 1800);
-  });
-
-
-  document.body.appendChild(button);
-}
-
-document.addEventListener('selectionchange', () => {
-  // Debounced by the mouseup below; selectionchange alone fires mid-drag.
-});
-
-document.addEventListener('mouseup', (event) => {
-  if ((event.target as HTMLElement)?.id === BUTTON_ID) return;
-  window.setTimeout(() => {
-    const selection = window.getSelection();
-    const text = (selection?.toString() ?? '').trim();
-    if (text.length < 50 || !selection || selection.rangeCount === 0) {
-      removeButton();
-      return;
-    }
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
-    showButton(rect, text);
-  }, 10);
-});
-
-document.addEventListener('mousedown', (event) => {
-  if ((event.target as HTMLElement)?.id !== BUTTON_ID) removeButton();
-});
-
-/* ---------- shared capture path ---------- */
-
-/** Brief confirmation at the corner, so a keystroke is not a silent no-op. */
-function toast(message: string, tone: 'ok' | 'warn' | 'bad' = 'ok') {
-  const el = document.createElement('div');
-  el.textContent = message;
-  Object.assign(el.style, {
-    position: 'fixed',
-    bottom: '18px',
-    right: '18px',
-    zIndex: '2147483647',
-    padding: '9px 14px',
-    font: '500 13px/1 ui-sans-serif, system-ui, sans-serif',
-    color: '#fff',
-    background: tone === 'ok' ? '#1a7f37' : tone === 'warn' ? '#9e6a03' : '#b62324',
-    borderRadius: '8px',
-    boxShadow: '0 4px 16px rgba(0,0,0,.3)',
-    pointerEvents: 'none',
-  } satisfies Partial<CSSStyleDeclaration>);
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2200);
-}
-
-async function keep(text: string, what: string) {
-  if (text.trim().length < 50) {
-    toast(`Nothing to keep — ${what} is under 50 characters.`, 'warn');
-    return;
-  }
-  toast('Keeping…', 'warn');
-  const res = await chrome.runtime.sendMessage(
-    envelope('worker', {
-      kind: 'ingest',
-      text: text.trim(),
-      sourceUrl: location.href,
-      title: document.title || location.hostname,
-    }),
-  );
-  if (res?.ok) {
-    const n = (res.data as { conflicts?: unknown[] })?.conflicts?.length ?? 0;
-    toast(n ? `Kept · ${n} conflict${n > 1 ? 's' : ''} to review` : 'Kept · awaiting your review');
-  } else {
-    toast(String(res?.error ?? 'Failed to keep'), 'bad');
-  }
-}
 
 /**
  * Everything the page says *about* an image, gathered into a passage.
@@ -286,8 +166,23 @@ function describeImage(
     parts.push('Nothing on the page said what this image shows.');
   }
 
-  parts.push(`Image URL: ${img.currentSrc || img.src}`);
-  parts.push(`Seen on: ${document.title || location.hostname} — ${location.href}`);
+  /*
+   * Provenance goes in metadata, never in the indexed text.
+   *
+   * These two lines used to append the image URL and the page URL to the passage
+   * itself, which meant embedding them. On an ordinary article that is mild; on a
+   * search-results page it is fatal — a Brave image CDN URL is ~250 characters of
+   * base64, several times the length of the actual caption, so the vector was
+   * mostly hash and BM25 got a pile of tokens that match nothing a person would
+   * ever type. The card cheerfully reported "22 words", almost none of them words.
+   *
+   * The image URL is already the chunk's `sourceUrl`, so it survives as the
+   * citation and as the thumbnail. The page it was seen on moves to a tag. What
+   * stays in the text is the page *title*, which is the one part with retrieval
+   * value: "the diagram from the page about adaptive thinking" is a real query.
+   */
+  const seenOn = document.title || location.hostname;
+  if (seenOn) parts.push(`Seen on: ${seenOn}`);
 
   return { text: parts.join('\n'), title: title.slice(0, 120), described: direct > 0 };
 }
@@ -317,6 +212,8 @@ async function keepImage(srcUrl: string) {
         'image',
         ...(described.described ? [] : ['needs-description']),
         location.hostname.replace(/^www\./, ''),
+        // Where it was seen, kept out of the indexed text — see describeImage().
+        `page:${location.href}`,
       ],
     }),
   );
@@ -378,8 +275,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       message.type === PREVIEW_PAGE ? readablePageText() : (window.getSelection()?.toString() ?? '');
     sendResponse({
       text: text.trim(),
-      title: document.title || location.hostname,
+      title: tabTitle(),
       url: location.href,
+      isPdf: isPdfTab(),
     } satisfies Preview);
     return true;
   }

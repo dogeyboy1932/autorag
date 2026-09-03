@@ -13,6 +13,7 @@
     "ext": "node extension/build.mjs",
     "ext:watch": "node extension/build.mjs --watch",
     "ext:check": "node probes/extension-check.mjs",
+    "ext:sync": "node probes/sync-check.mjs",
     "bridge": "node extension/connector/serve.mjs",
     "ext:relay": "node probes/relay-check.mjs"
   },
@@ -22,6 +23,7 @@
     "@mcp-b/webmcp-local-relay": "^5.1.0",
     "idb": "^8.0.3",
     "next": "^16.3.4",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

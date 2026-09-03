@@ -39,7 +39,87 @@ export type Request =
   | { kind: 'forget'; sourceId: string }
   | { kind: 'wipe' }
   | { kind: 'warmup' }
-  | { kind: 'activity' };
+  | { kind: 'activity' }
+  /**
+   * Retrieve, then have a model write the answer from what was retrieved.
+   *
+   * The only request in this union that leaves the machine, and the only one that
+   * costs money. Everything else — capture, embedding, screening, search — runs
+   * locally and always will. Answering is the one job the corpus cannot do for
+   * itself: it can find the passages, but composing prose out of them needs a
+   * language model, and there is not one in the browser.
+   *
+   * `settings` travels with the request rather than being read from storage in the
+   * offscreen document, so the key's path through the extension is visible in one
+   * place instead of implicit.
+   */
+  | {
+      kind: 'ask';
+      question: string;
+      settings: AskSettings;
+      /**
+       * Earlier turns, when Remember is on. Empty means every question is
+       * independent — the default, because the failure mode of carrying context
+       * is a quiet loss of citation integrity rather than an error.
+       */
+      history?: AskTurn[];
+    }
+  /**
+   * Reconcile with the cloud: push what is here, pull what is not, apply
+   * deletions both ways. Local storage stays the only thing anything reads from —
+   * this mirrors, it does not relocate.
+   */
+  | { kind: 'sync'; cloud: CloudSettings }
+  | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean };
+
+/** Where a synced corpus lives. Stored in chrome.storage.local, like the API key. */
+export interface CloudSettings {
+  url: string;
+  anonKey: string;
+  accessToken?: string;
+  refreshToken?: string;
+  email?: string;
+}
+
+/** Where the answering model lives and what it costs. Stored in chrome.storage.local. */
+export interface AskSettings {
+  apiKey: string;
+  model: string;
+}
+
+export interface AskTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * The models the panel offers, with what they cost, because Ask is the first thing
+ * in Autorag that spends money and a price nobody can see is a price nobody agreed to.
+ */
+export const ASK_MODELS = [
+  /*
+   * `adaptive` marks the models that take `thinking: {type:'adaptive'}` and
+   * `output_config.effort`. Haiku 4.5 predates both: adaptive thinking is not a
+   * mode it has, and `effort` is rejected outright. Sending them anyway made every
+   * Haiku answer fail — a picker that offers a model and then speaks to it in a
+   * dialect it does not understand.
+   */
+  { id: 'claude-opus-5', label: 'Opus 5', input: 5, output: 25, adaptive: true },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5', input: 2, output: 10, adaptive: true },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', input: 1, output: 5, adaptive: false },
+] as const;
+
+export const DEFAULT_ASK_MODEL = 'claude-opus-5';
+
+/** Panel ← offscreen, as the answer is written. */
+export const ASK_DELTA = 'autorag:ask-delta';
+export interface AskDelta {
+  type: typeof ASK_DELTA;
+  requestId: string;
+  text?: string;
+  done?: boolean;
+  error?: string;
+}
 
 export type Response<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -81,6 +161,16 @@ export interface Preview {
   text: string;
   title: string;
   url: string;
+  /**
+   * The tab is a PDF, so `text` being empty says nothing about the page.
+   *
+   * Chrome renders a PDF in a plugin whose text reaches no DOM the extension can
+   * see — measured: `getSelection()` returns '' in every frame, including the
+   * viewer's own, even with the whole document selected. Without this flag the
+   * panel reads the empty string as "nothing is highlighted", which blames the
+   * person for the one thing they definitely did.
+   */
+  isPdf?: boolean;
 }
 
 /** One line in the panel's activity feed. */

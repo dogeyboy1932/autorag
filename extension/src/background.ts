@@ -80,6 +80,61 @@ async function injectIntoOpenTabs(): Promise<void> {
   }
 }
 
+/**
+ * Opens a PDF in Autorag's own reader.
+ *
+ * Chrome's PDF viewer renders through PDFium, whose text reaches no DOM — so a
+ * highlight there is invisible to every extension, this one included. The reader
+ * draws the PDF itself, which makes the selection ordinary DOM and every capture
+ * path work unchanged. See `extension/src/reader/main.ts`.
+ *
+ * Opt-in per document, never automatic: Chrome's viewer stays the default, so
+ * printing and form-filling still work where they always did.
+ */
+function openInReader(pdfUrl: string) {
+  void chrome.tabs.create({
+    url: chrome.runtime.getURL(`reader.html?src=${encodeURIComponent(pdfUrl)}`),
+  });
+}
+
+/**
+ * Delivers a message to whatever is running in a tab, content script or not.
+ *
+ * `chrome.tabs.sendMessage` reaches **content scripts only**. The PDF reader is an
+ * extension page, so it never receives one, and every capture path was silently
+ * dead there — the shortcut did nothing, and the panel concluded the tab had no
+ * Autorag in it and told people to reload a page that was working perfectly.
+ *
+ * The obvious fix — check whether `tab.url` is the reader — does not work, and
+ * failed in a way worth recording: **`tab.url` is `undefined` for the extension's
+ * own pages unless the extension holds the `tabs` permission.** `<all_urls>` host
+ * permission does not cover `chrome-extension://`, and `activeTab` only grants the
+ * URL after a real user gesture, so the check passed or failed depending on how
+ * the tab had been focused. Asking for `tabs` would fix it and cost an install-time
+ * warning about reading your browsing history — a bad trade for a tool whose whole
+ * claim is that nothing leaves the machine.
+ *
+ * So: try the content script, and fall back to a broadcast when nothing answers.
+ * `tabId` rides along because a broadcast reaches *every* open reader and only the
+ * one you are looking at should act; the reader compares it with
+ * `chrome.tabs.getCurrent()`. No permission, no URL, no state to go stale.
+ */
+async function sendToTab(
+  tab: chrome.tabs.Tab,
+  message: { type: string; srcUrl?: string },
+): Promise<unknown> {
+  if (!tab.id) return null;
+  try {
+    return await chrome.tabs.sendMessage(tab.id, message);
+  } catch {
+    try {
+      return await chrome.runtime.sendMessage({ ...message, tabId: tab.id });
+    } catch {
+      return null;
+    }
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'autorag-keep',
@@ -94,6 +149,15 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Keep this image’s description in Autorag',
     contexts: ['image'],
   });
+  chrome.contextMenus.create({
+    id: 'autorag-read-pdf',
+    // Shown on links and on the page itself, because a PDF you are already
+    // looking at is a page, while one you have not opened yet is a link.
+    title: 'Read this PDF in Autorag',
+    contexts: ['link', 'page'],
+    targetUrlPatterns: ['*://*/*.pdf', '*://*/*.pdf?*'],
+    documentUrlPatterns: ['*://*/*.pdf', '*://*/*.pdf?*'],
+  });
   void ensureOffscreen();
   void injectIntoOpenTabs();
 });
@@ -105,9 +169,14 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'autorag-read-pdf') {
+    const url = info.linkUrl ?? info.pageUrl;
+    if (url) openInReader(url);
+    return;
+  }
   if (!tab?.id) return;
   if (info.menuItemId === 'autorag-keep') {
-    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
+    void sendToTab(tab, { type: 'autorag:capture-selection' });
   }
   if (info.menuItemId === 'autorag-keep-image' && info.srcUrl) {
     void chrome.tabs.sendMessage(tab.id, {
@@ -127,11 +196,19 @@ chrome.commands.onCommand.addListener(async (command) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
   if (command === 'keep-selection') {
-    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-selection' });
+    void sendToTab(tab, { type: 'autorag:capture-selection' });
   }
   if (command === 'keep-page') {
-    void chrome.tabs.sendMessage(tab.id, { type: 'autorag:capture-page' });
+    void sendToTab(tab, { type: 'autorag:capture-page' });
   }
+});
+
+/*
+ * The in-page offer on a Chrome-rendered PDF. The content script cannot open an
+ * extension page itself, so it asks here.
+ */
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'autorag:open-reader' && message.url) openInReader(String(message.url));
 });
 
 /** Panel → the tab you are looking at. Used for both preview and capture. */
@@ -140,12 +217,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return sendResponse(null);
-    try {
-      sendResponse(await chrome.tabs.sendMessage(tab.id, { type: message.what }));
-    } catch {
-      // No content script on this tab — chrome:// pages, the store, a PDF viewer.
-      sendResponse(null);
-    }
+    // Null still means "nothing in this tab answered" — a chrome:// page, the
+    // store, or a tab that predates the extension. The reader now answers.
+    sendResponse(await sendToTab(tab, { type: message.what }));
   })();
   return true;
 });
@@ -167,10 +241,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         target: { tabId: tab.id },
         world: 'MAIN',
         func: async () => {
-          const ctx = (document as unknown as { modelContext?: { getTools(): Promise<{ name: string }[]> } })
-            .modelContext;
-          if (!ctx?.getTools) return { present: false, tools: [] };
-          return { present: true, tools: (await ctx.getTools()).map((t) => t.name) };
+          const ctx = (
+            document as unknown as {
+              modelContext?: { getTools(): Promise<{ name: string; description?: string }[]> };
+            }
+          ).modelContext;
+          // The scheme comes from inside the page because `tab.url` is undefined
+          // for the extension's own pages without the `tabs` permission — which is
+          // exactly the case the panel most needs to name.
+          const scheme = location.protocol;
+          if (!ctx?.getTools) return { present: false, tools: [], scheme };
+          const tools = await ctx.getTools();
+          return {
+            present: true,
+            scheme,
+            tools: tools.map((t) => ({ name: t.name, description: t.description ?? '' })),
+          };
         },
       });
       sendResponse(result ?? null);

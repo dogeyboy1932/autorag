@@ -1,0 +1,127 @@
+/*
+ * The reader's own chrome. Everything that positions the text layer over the
+ * canvas comes from the vendored `pdfjs/pdf_viewer.css`, which is loaded first —
+ * that file is what makes a selection line up with the glyphs you can see, and
+ * it expects the `.pdfViewer` / `.page` structure `main.ts` builds.
+ */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f4f4f5;
+  --fg: #18181b;
+  --bar: #ffffff;
+  --line: #d4d4d8;
+  --muted: #52525b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b;
+    --fg: #f4f4f5;
+    --bar: #27272a;
+    --line: #3f3f46;
+    --muted: #a1a1aa;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+#bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+#bar .spacer {
+  flex: 1;
+}
+
+#name {
+  font-weight: 600;
+  /* A PDF filename can be one long unbroken token; it must not push the bar wide. */
+  overflow-wrap: anywhere;
+  max-width: 50%;
+}
+
+#pages {
+  color: var(--muted);
+}
+
+#bar button,
+#bar a {
+  padding: 4px 10px;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+#status {
+  max-width: 46rem;
+  margin: 40px auto;
+  padding: 16px 18px;
+  background: var(--bar);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+#status h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+#status p {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+#status a {
+  color: inherit;
+}
+
+/*
+ * `.pdfViewer .page` is sized inline per page from the PDF's own viewport; the
+ * vendored stylesheet's 816x1056 default is only a placeholder. These rules add
+ * the page furniture the full viewer would otherwise bring with it.
+ */
+#viewer {
+  --scale-factor: 1;
+  padding: 20px 0 60px;
+}
+
+#viewer .page {
+  margin: 0 auto 16px;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 22%);
+  position: relative;
+  overflow: hidden;
+}
+
+#viewer .page canvas {
+  display: block;
+}
+
+/*
+ * A page that has scrolled out of view keeps its box but drops its canvas, so a
+ * 300-page document does not hold 300 bitmaps in memory. The text layer stays:
+ * it is cheap, and dropping it would break a selection dragged across pages.
+ */
+#viewer .page.placeholder {
+  background: var(--bar);
+}
