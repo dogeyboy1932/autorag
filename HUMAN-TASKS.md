@@ -1,396 +1,266 @@
 # Testing Autorag
 
-Everything Autorag is meant to do, and how you check each one yourself.
+Five things to check: **keep**, **review**, **recall**, **ask**, and **cloud memory**.
+Everything else in the extension serves one of them.
 
-Autorag is a curated memory that lives in your browser. You keep things while you read; you
-decide what stays; any agent that speaks WebMCP can search what survived. No server, no
-account, no API key, and nothing leaves your machine except a one-time model download.
+Autorag is a curated memory that lives in your browser. You keep things while you read, you
+decide what stays, and it answers questions from what survived — citing the page each claim
+came from.
 
-I can prove most of this by running it — see [What I can prove without you](#what-i-can-prove-without-you)
-at the bottom. **What I cannot do is use it.** The tests below are the ones that need a
-person: they are about whether it feels right, not whether it returns the right JSON.
+`pnpm ext:check` proves 46 of these mechanically. The tests below are the ones that need a
+person: whether it *feels* right, not whether it returns the right JSON.
 
 ---
 
-## Set up (2 minutes, once)
+## Set up
 
 ```bash
-pnpm install
-pnpm ext
+pnpm install && pnpm ext
 ```
 
-Then in Brave or Chrome: `brave://extensions` → **Developer mode** (top right) →
-**Load unpacked** → select `extension/dist`.
+`brave://extensions` → **Developer mode** → **Load unpacked** → `extension/dist`.
+Open the panel with the toolbar icon.
 
-That is the whole install. It now runs on every tab; nothing to start, no server.
+**First capture takes ~1 minute** while a 25MB embedding model downloads, once. The header
+tracks it: `downloading model 40%` → `model ready`.
 
-**If you reload the extension while working on it**, tabs that were already open get the
-new code injected automatically on install and on browser start — but a mid-session
-*reload* of an unpacked extension may not reach them. If a page stops responding to
-highlights after you reload the extension, reload the page. The panel says so explicitly
-when it happens rather than blaming the page.
+> Never becomes ready? Brave Shields is blocking the one-time download from
+> `huggingface.co`. Drop Shields once, reload, put them back.
 
-**The first capture takes about a minute** while a 25MB embedding model downloads, once.
-The side-panel header tracks it: `downloading model 40%` → `model ready · wasm`. Cached
-after that.
-
-> **If it never becomes ready:** Brave Shields is blocking the one-time download from
-> `huggingface.co`. Drop Shields for that request once, reload, then put them back up.
-> Nothing else in the extension touches the network — worth confirming in the Network tab
-> while you are there.
-
-Open the side panel with the toolbar icon. Five sections: **Reading now**, **To review**,
-**Recall**, **Manage corpus**, **Activity**.
+**If highlights stop working after you reload the extension**, reload the page. The panel
+says so rather than blaming the page.
 
 ---
 
-## The features, and how to test each
+## 1. Keep
 
-Work down the list. Each one says what it is meant to do, what you do, and what "working"
-looks like — so a failure is something you can name rather than a vague sense that it was
-awkward.
+Highlight a paragraph on any article. A **Keep** button appears beside it — click it, or
+press <kbd>Ctrl+Shift+K</kbd>.
 
-### 1. Capture costs one gesture
+Then try, in order:
 
-*Meant to:* let you keep something from wherever you already are, without opening an app,
-copying, or pasting a URL anywhere.
+- **A whole page** — panel → *Preview this page*, trim it, keep it.
+- **An image** — right-click → *Keep this image's description*. One with a caption, one
+  without.
+- **A PDF** — highlight in it. Chrome's viewer can't be read, so you'll be offered
+  **"Open it in Autorag's reader"**. Click it, then highlight normally.
 
-Four ways in. Try all four on real pages you were reading anyway:
+**Passes if:** every capture takes one gesture where you already are, and lands in *To
+review*. The PDF passage cites the PDF's URL and filename, not `chrome-extension://…`.
 
-| Do this | Expect |
-|---|---|
-| Highlight text | A **Keep** button appears next to the selection; clicking it turns to "Kept" |
-| Highlight, then `Ctrl+Shift+K` | Same, without touching the mouse |
-| `Ctrl+Shift+E` with nothing selected | Keeps the whole article you are reading |
-| Right-click a selection → **Keep this in Autorag** | Same as the button |
-| Right-click an image → **Keep this image's description** | Stores the caption/alt text with the image URL — see §2b |
+**Expected:** an uncaptioned image is staged but can't be approved until you describe it —
+its only text would be a URL, and no search would ever match that. A *scanned* PDF has no
+text layer at all; nothing can select text that was never text.
 
-Shortcuts clash; rebind at `brave://extensions/shortcuts`. **The panel shows the binding
-you actually have** rather than the one the manifest asked for — worth knowing, because
-Chromium drops a key it considers taken without saying a word. This bit us: `Ctrl+Shift+S`
-was the original default and Brave's own screenshot tool owns it, so that shortcut never
-existed while three documents told people to press it. `pnpm ext:check` now fails if any
-declared shortcut comes back unassigned.
+---
 
-**If the panel says the shortcut is unassigned**, the browser refused it and there is no
-way around that except picking another: click **Assign one** in the panel (or go to
-`brave://extensions/shortcuts`), find *Keep the highlighted text in Autorag*, click the
-box and press your key. Assigning by hand always wins over the manifest's suggestion.
+## 2. Review
 
-**Passes if:** each of the four stores something, and you never had to leave the page.
-**Tell me if:** any of them costs a second gesture, or gives you no sign it worked.
+Open the panel. Everything you kept is waiting — nothing is searchable yet.
 
-### 2b. Images are kept by their description, not their pixels
+- **Edit** a passage before keeping it. Add a note.
+- **Discard** one. Leave the reason blank.
+- Keep something that contradicts something you already kept.
 
-*Meant to:* be honest about a hard limit. Autorag indexes text — the embedding model
-has never seen a pixel — so an image is stored as whatever the page says *about* it
-(alt text, caption, title, the paragraph beside it) with the image URL as its source.
+**Passes if:** an edited passage is findable by its *new* wording (it re-embeds, not just
+re-words). A discard needs no justification. A contradiction gets flagged as a conflict
+showing both sides.
 
-Right-click an image with a caption and choose **Keep this image's description**. Then
-right-click a decorative one — a logo, a spacer, an icon with no alt text.
+**Expected:** screening over-flags. It would rather show you two related passages than
+silently merge them.
 
-**Passes if:** the captioned one lands in the queue as its description and is findable
-later by searching that description, and recall hands back the image's own URL. The
-undescribed one is **refused**, with a toast saying there is nothing to search on.
-**Expected, not broken:** an uncaptioned screenshot cannot be kept. Storing a URL that
-no search could ever match would be a filing cabinet that swallows things.
-**Tell me if:** you want real image search. That needs a second, multimodal model
-(CLIP or SigLIP) and roughly doubles the install — a different decision, not a tweak.
+**Editing something already saved:** search for it in Recall and use **Edit** on the result.
+Saving sends it back to *To review* — it was approved as it read then, and changing the text
+withdraws that. Re-approve and you have vouched for what it now says. A *discarded* passage
+cannot be edited at all: its text is what future screening matches against.
 
-### 2. Whole-page capture shows you what it got, first
+**Discarding one saved passage:** same place — **Discard** on a Recall result. It leaves the
+corpus, the rest of its page is untouched, and the reason (optional) is replayed if the same
+material comes back. A discard is final: the text stays as something screening matches
+against, so it cannot be edited or restored.
 
-*Meant to:* let you keep a long article without selecting 2,000 words, while never storing
-something you have not seen.
+**One thing to watch:** an edited passage is out of your searchable corpus until you
+re-approve it. Edit several and walk away and they all sit in the queue — the header count
+is the only thing that will tell you.
 
-Open the panel on an article and press **Preview this page** under *Reading now*. Then try
-**Preview selection**.
+---
 
-**Passes if:** you get the article's text in an editable box, roughly the body without
-navigation and cookie banners, and **nothing is stored** until you accept it. Trim it in
-the box and confirm the trimmed version is what lands in the queue.
-**Tell me if:** the extraction grabs menus and footers, or misses the article on a site you
-care about. It uses `<article>`, else `<main>`, else body-minus-chrome — deliberately crude,
-and I want to know which real pages defeat it.
+## 3. Recall
 
-### 3. Nothing is searchable until you approve it
-
-*Meant to:* keep the memory something you curated, not something that accumulated.
-
-Keep three or four things, then open **To review**. Approve some, discard others.
-
-Then use the other three controls on a card:
-
-- **Edit** — fix a capture that clipped a sentence or dragged in a cookie banner. Saving
-  re-embeds *and* re-screens, so the passage that gets approved is the passage that was
-  screened. The flags underneath may change when you save; that is correct, not a glitch.
-- **The note field** — your own words about the passage: why it matters, what to distrust.
-  It travels with the passage into every future search result. It is deliberately **not**
-  indexed, so a note about a passage never competes with the passage itself in search.
-- **Discard** — with or without a reason. The box is optional now: a reason is genuinely
-  useful (screening replays it if similar material returns) but it is an offer, not a toll.
-
-**Passes if:** approved passages become findable in **Recall** and discarded ones never do;
-an edited passage is findable by its *new* wording and not its old; and Discard works with
-the reason box left empty.
-**Tell me if:** anything shows up in Recall that you did not approve. That is the one
-invariant the whole design rests on.
-
-### 4. A discard is remembered, with your reason
-
-*Meant to:* stop the same rejected material coming back at you silently.
-
-Discard something and type a real reason ("marketing copy, not a fact"). Then keep the same
-passage again from the same or a similar page.
-
-**Passes if:** it comes back into the queue **flagged**, quoting your own sentence back at
-you.
-**Tell me if:** it returns unflagged — that means screening did not connect the two.
-
-### 5. Screening flags related material — and deliberately over-flags
-
-*Meant to:* nominate pairs worth a second look. It flags three kinds: `duplicate`,
-`near_duplicate`, and `contradiction`.
-
-The one worth testing on purpose: read two sources on the same subject that carry different
-figures — a spec page and a review with different numbers, two articles with different
-dates. Keep a passage from each.
-
-**Passes if:** the second one lands in **To review** with a `contradiction` badge naming
-the specific figures that differ.
-**Expected, not broken:** it flags things that are not real conflicts. It cannot read; it
-sees "same subject, different numbers" and hands it to you. It also misses some real ones —
-a measured miss scored 0.659 against a 0.72 same-subject threshold. **It nominates, you rule.**
-
-### 6. An agent triages the flags before they reach you
-
-*Meant to:* make the over-flagging affordable. An agent reads both passages and leaves you a
-sentence, so you decide from a reading rather than by comparing two passages yourself.
-
-This is the newest piece. Test it with any agent that can drive your browser over WebMCP —
-Claude Code with chrome-devtools-mcp, or your desktop MCP client through the bridge in §11.
-With something flagged in the queue, ask it:
-
-> Check my Autorag review queue for flagged passages and rule on any conflicts you find.
-
-**Passes if:** the flagged card in **To review** grows a blue block underneath —
-`agent: not actually a conflict` or `agent: the new one supersedes the old` — with the
-agent's reasoning and the line *"Advisory. You still decide."*
-**And crucially:** the agent must **not** be able to approve or discard. Ask it to approve
-something and it should tell you it cannot. If an agent ever approves anything, that is a
-bug, not a feature.
-**Tell me if:** the reasoning is vague or cites similarity scores instead of the actual
-claims — that is a wording bug in the tool description and I fix it in
-`extension/src/content/webmcp.ts`.
-
-### 7. Recall returns passages and sources, never an answer
-
-*Meant to:* report what you kept, with provenance, and let you (or your agent) judge.
-There is no LLM anywhere in Autorag.
-
-Search **Recall** for something you kept a while ago. Try a single word, a full question,
-and a typo.
+Search **Recall** for something you kept a while ago. Try one word, a full question, and a
+typo.
 
 **Passes if:** you get passages with the URL and date each came from, plus a confidence
-label — and it never invents a summary.
-**Expected, not broken:** a one-word search scoring 0.2 and being right. Short queries always
-score low. Trust the **confidence** label, not the number.
-**Tell me if:** something you know is in there does not come back for a reasonable question.
-That is the retrieval failure I most want examples of.
+label.
 
-### 8. Your memory follows you onto other sites
+**Expected:** a one-word search scoring 0.2 and being right. Short queries always score low
+— trust the **confidence** label, not the number.
 
-*Meant to:* be the thing that separates this from a notebook. The memory is not scoped to
-the page you kept it from.
-
-Keep something on site A. Go to a completely unrelated site B. Ask an agent driving your
-browser what it knows about the topic.
-
-**Passes if:** it recalls the passage from site A while sitting on site B, and cites A.
-**Tell me if:** the tools are missing on some site. Some pages have unusual CSP; I want the
-list of ones where the surface does not appear.
-
-### 9. Out of date is different from wrong
-
-*Meant to:* let a source stop being authoritative without pretending you never read it.
-
-In **Manage corpus**, pick a source and **Mark out of date**. Search for something it covers.
-Then **Forget** a different one.
-
-**Passes if:** the stale source still appears in results but ranks lower and is labelled;
-the forgotten one is gone entirely, and forgetting asked you twice.
-**Tell me if:** a stale source outranks a fresh one on the same subject.
-
-### 9b. The panel fits whatever width you drag it to
-
-*Meant to:* survive being narrow, which a side panel always is.
-
-Drag the panel edge in as far as it goes.
-
-**Passes if:** everything reflows — no sideways scrolling, no buttons pushed out of reach.
-Checked automatically at 420, 340 and 280px.
-**Tell me if:** any width scrolls sideways. The cause is almost always one unbroken token
-(a URL in a captured passage) that cannot wrap, and it is a one-line fix each time.
-
-### 10. It says what it is doing
-
-*Meant to:* stop an empty corpus and a slow model looking identical to a broken extension.
-
-Watch **Activity** during your first capture, and the model badge in the header.
-
-**Passes if:** you can tell, at any moment, whether it is working or idle — chunking,
-embedding, screening, downloading, and their outcomes.
-**Tell me if:** anything ever happens silently, or a spinner has no explanation next to it.
-
-### 11. Talking to your memory (this is the payoff — do it once)
-
-Autorag is the **R** in RAG. It finds and returns passages; it never writes prose. The
-words come from whatever agent you already talk to, which reaches the corpus as ordinary
-MCP tools. Three ways in, cheapest first.
-
-**a. Claude Code, in this repo.** Already configured — `.mcp.json` registers the relay as
-an MCP server named `autorag`. You need two things running:
-
-```bash
-pnpm bridge      # serves http://localhost:3210
-```
-
-Open `http://localhost:3210` in the browser where the extension is installed and **leave
-that tab open** (it should say *7 memory tools exposed to your desktop agent*). Then start
-a Claude Code session here and just ask:
-
-> What have I saved about tidal turbines?
-
-Claude calls `autorag_recall`, gets your passages back with their URLs, and writes the
-answer citing them. Nothing you kept goes anywhere except into that answer.
-
-**b. Claude Desktop or Cursor.** Same relay, their config file:
-
-```json
-{
-  "mcpServers": {
-    "webmcp-local-relay": {
-      "command": "npx",
-      "args": ["-y", "@mcp-b/webmcp-local-relay@latest"]
-    }
-  }
-}
-```
-
-Bridge running and its tab open, same as above.
-
-**c. An agent driving your browser.** No bridge needed — the seven tools are on whatever
-page it is looking at. This is the one that needs no setup at all, and the one no consumer
-product ships yet.
-
-**The two things that make it fail**, both quiet: the bridge tab must be open (the relay
-talks to a page, not to the extension), and something must be **approved** — pending
-passages are deliberately unsearchable, so a corpus you have kept but not reviewed answers
-nothing.
-
-### 11b. Checking the bridge when it misbehaves
-
-Ask your agent: *"List the connected WebMCP sources, then search my memory for X."*
-
-**Passes if:** it lists your browser as a source, sees the seven `autorag_*` tools, and gets
-back real passages with URLs. `pnpm ext:relay` proves the same thing headlessly, 6/6.
-
-**Why the odd extra tab.** Two measured browser limits, both in `lib/webmcp/API-DELTA.md`: a
-`ws://127.0.0.1` socket cannot be opened from an `https://` page (D16), and WebMCP refuses to
-register tools on a `chrome-extension://` origin (D17). A page served over plain http on
-localhost is the only context that is neither. If this should feel less strange later, the
-fix is native messaging rather than a loopback socket.
-
-### 12. Nothing leaves your machine
-
-*Meant to:* be true, not just claimed. Embeddings run in your browser; the corpus is in local
-storage; there is no backend to send anything to.
-
-Open DevTools → Network on any page, with the panel open, and capture and recall a few things.
-
-**Passes if:** after the one-time `huggingface.co` model download, **no outbound request** is
-made by the extension for any capture, search, or agent call.
-**Tell me if:** you see one. That would be a serious bug.
+**Tell me if:** something you know is in there doesn't come back for a reasonable question.
+That's the retrieval failure I most want examples of.
 
 ---
 
-## The second artifact: the web app
+## 4. Ask — the RAG agent
 
-`pnpm dev` → `http://localhost:3111`. Not the product, and you do not need it. It exists
-because an agent-browser that cannot run extensions (ChatGPT's in-app browser, for one) can
-still visit a URL and find a tool surface there. It carries 15 tools including the ones the
-extension deliberately withholds — an agent can approve and reject there, because on that
-artifact the agent is the only actor present.
+Panel → **Answering model** → paste an Anthropic API key, pick a model. Then ask Recall a
+real question, ideally one spanning two different things you kept.
 
-Its corpus is **separate** from the extension's. Different origins, and browser storage does
-not cross origins. Accepted, not an oversight.
+**Passes if:** an answer appears above the passages, written from them, with `[1]`, `[2]`
+citations matching the numbered sources below it.
 
-Test it only if you care about that case: open the page, ask an agent to ingest something,
-watch the review queue fill.
+**Then ask about something you never kept.** It should say so plainly instead of answering
+from general knowledge. That refusal is the product working.
+
+**The test that matters:** close Claude Code, stop every other tool, ask again. Autorag
+answers on its own.
+
+**Answers should be complete, not just short.** If the passages list ten steps you should
+get ten. If a reply ever ends with *"cut off at the length limit"*, that is the ceiling
+being honest rather than the answer being finished — tell me, because the limit is generous
+now and hitting it means something is wrong.
+
+**Cost:** a few thousand tokens per answer — well under a cent on Opus 5. The panel prints
+each model's rate. Nothing calls the model unless you ask.
+
+**Privacy, precisely:** your question and the retrieved passages go to the provider.
+Capture, review, embedding, indexing and search stay local. Remove the key and Autorag is
+exactly what it was — the header line under the counts tracks this and stops saying
+"Nothing is uploaded" once that is no longer true.
+
+**Images are shown to the model, not just described to it.** If a kept image contains the
+answer — a definition, a chart, a diagram — Ask reads the picture itself. The stored
+description is only what made it findable; it is often a filename and nothing more.
+
+**Tell me if:** it asserts something the passages don't support. That's the failure the
+whole design exists to prevent.
+
+### 4b. Remember — follow-up questions
+
+Tick **Remember this conversation**, ask something, then ask a follow-up using a pronoun:
+*"and the second one?"*, *"why does that matter?"*
+
+**Passes if:** the follow-up is understood, and the answer line says what it actually
+searched for — a rewritten standalone query, not your pronoun. Citations still point at
+passages, never at the previous answer.
+
+**Off by default, on purpose.** Carrying the conversation makes follow-ups work; it also
+lets the model lean on its own earlier prose instead of the passages, which is a quiet loss
+of citation integrity rather than a visible error. The turn count and running token total
+sit beside the checkbox, with **Clear** to reset.
+
+**Tell me if:** an answer cites something that was never in the passages for *that* turn.
 
 ---
 
-## What I can prove without you
+## 5. Cloud memory — off one device
 
-These run headless against a real browser and either pass or fail. Re-run any of them any
-time; if one goes red, that is mine to fix.
+*Default is local: free, offline, nothing leaves this machine.* This is opt-in.
+
+**One-time setup**, in this order — steps 2 and 3 are the ones that bite:
+
+1. Create a free Supabase project. Copy its **URL** and **anon public** key into the panel.
+2. Supabase → **SQL editor** → run the script the panel shows under *setup steps*.
+3. Supabase → **Authentication → Sign In / Providers → Email** → turn off **Confirm email**.
+   An extension has no address for a confirmation link to come back to; left on, the link
+   points at `localhost:3000` and you get `otp_expired`.
+4. In the panel, **Create account** with any email and password. **This is a user inside
+   your project — not your supabase.com login**, which does not exist there and will fail
+   with "Invalid login credentials".
+5. **Sync now.**
+
+Then: open Autorag in a **different browser profile**, sign in with the same email, **Sync
+now**, and search for something you kept in the first one.
+
+**Passes if:** it is there, with its source URL. Then forget a source in the second profile,
+sync both, and confirm it stays gone in the first — a resurrected passage is the failure
+this is really testing.
+
+**Sync runs on its own.** Signing in pushes what is already here; every change after that
+schedules a push a few seconds later. **Sync now** is a manual nudge, not the only trigger.
+Watch the **Activity** feed — a failed sync is reported there, loudly, because a silent one
+looks exactly like a memory that is safely backed up and is not.
+
+**Expected:** the first sync of a large corpus is one long upload; the Activity feed reports
+each stage. Ranking still runs locally, so search speed is unchanged either way.
+
+**Cloud mode uploads your whole corpus** — everything ever kept, not just what a question
+retrieves. That is a bigger step than the answering key and the panel says so before you
+connect.
+
+**Tell me if:** anything you deleted comes back.
+
+---
+
+## Also worth a minute
+
+- **Cross-site** — keep something on site A, then on unrelated site B ask an agent driving
+  your browser what it knows. It should recall A and cite it.
+- **Panel width** — drag the panel narrow. Elements shrink; nothing scrolls sideways.
+- **Stale vs forget** — *Manage corpus* → mark a source out of date (demoted, still
+  findable) vs forget it (gone).
+- **Activity** — the feed should explain what is happening during the model download and
+  any slow capture.
+
+---
+
+## Tested by hand — reported passing on 2026-09-03
+
+Everything in sections 1–5 was walked through against a live setup, including **cloud sync
+and Supabase auth against a real project**. What follows is what remains genuinely
+unexercised — and note the distinction: `ext:check` proves mechanism, a person walking
+through it proves the product. Neither substitutes for the other.
+
+## Still not exercised
+
+Each is invisible to `ext:check` because it needs real time, real volume, or a second
+party.
+
+- **It survives a restart.** Keep and approve something, quit the browser completely,
+  reopen. The corpus should be intact and searchable. Still the claim the whole product
+  rests on, and worth re-checking after any storage change. Your database is real and on disk:
+  `~/snap/brave/current/.config/BraveSoftware/Brave-Browser/Default/IndexedDB/chrome-extension_<id>_0.indexeddb.leveldb`.
+  To look inside it, open the panel as a tab → F12 → Application → IndexedDB → `autorag`.
+- **It survives being left alone.** Leave the browser open a few hours, then highlight
+  something and press Keep. MV3 stops the service worker after ~30s idle and can reclaim the
+  offscreen document under memory pressure. If capture works at 9am and silently fails at
+  3pm, this is why.
+- **Answers stay complete on long lists.** Ask something whose answer is a ten-step
+  procedure, especially one read out of a diagram. It should give all ten. If a reply ends
+  with *"cut off at the length limit"*, the ceiling is being honest — but the ceiling is
+  generous now, so hitting it means something else is wrong.
+- **It stays usable as it fills up.** Get to 100–200 passages and check Recall is still fast
+  and the queue still scrolls. Search loads the whole corpus into memory and ranks it
+  (`allChunks()` in `src/rag/store.ts`) — fine at this size, worth knowing where "fine" stops.
+- **Forget everything actually forgets.** *Library → Sources → Erase the whole corpus.*
+  Confirm the counts go to zero, restart the browser, confirm they are still zero. In cloud
+  mode, confirm the other device does not hand it all back.
+- **An agent can curate.** Three of the seven WebMCP tools exist only for this — read the
+  queue, see both sides of a flagged pair, rule on it. Probes exercise them; no person has.
+  Needs an agent driving the *browser*; the desktop-MCP path was removed.
+- **The web app still works.** `pnpm dev` → `localhost:3111`. It registers its own
+  `autorag_*` tools and the extension used to collide with them there. It should now stand
+  down on that page: the app's own tools, no duplicates, no console errors.
+
+---
+
+## What is automated
 
 ```bash
-pnpm typecheck && pnpm build && pnpm ext
-pnpm ext:check    # the extension end to end, on real third-party pages: 24/24
-pnpm ext:relay    # a real desktop MCP client reaching the memory: 6/6
-
-pnpm dev          # these two need the app running, in another terminal
-pnpm bench        # retrieval quality: top-1 21/21 · no overclaim 3/3 · no withhold 25/25
-pnpm loop         # the web app's 15-tool surface: 15/15
+pnpm typecheck && pnpm ext && pnpm ext:check   # 46/46 against real Brave
+pnpm ext:sync                                  # two profiles: memory crosses, deletions stick
+pnpm bench                                     # retrieval: 21/21 top-1
 ```
 
 `ext:check` covers, among others: a third-party page gains a WebMCP surface it never had;
-a highlight-and-click actually stores text; keep → approve → recall returns the passage with
-its source; an agent reads the review queue and both sides of a flagged pair; an agent's
-ruling lands on the queue where you will read it; the agent **cannot** approve or discard;
-and the corpus can be managed.
+capture, approval and recall round-trip with provenance; an agent can read the review queue
+but cannot approve; the PDF reader's text layer is selectable and cites the PDF; Ask stays
+grounded and never leaks the API key.
 
-Worth knowing: a green run on one browser is not proof. One defect (D15) passed on Chrome and
-failed on Brave. Both are checked now.
+`pnpm bench` needs `pnpm dev` running.
 
 ---
 
-## Still unproven — the honest list
+## Known limits
 
-1. **Does the corpus survive a full browser restart?** Never explicitly tested: every
-   automated run uses a throwaway profile. **You will test this just by using it** — keep
-   things today, quit the browser completely, reopen tomorrow, and check they are still in
-   **Manage corpus**. Tell me either way.
-2. **Does a cold agent pick the right tool from the descriptions alone?** Every test so far
-   names the tool directly. The claim MCP exists for — that a model reads a description and
-   chooses correctly — is untested. If you point a fresh agent at a page and say only *"save
-   something useful here"*, watch which tool it reaches for. A wrong choice is a wording bug,
-   and mine to fix.
-3. **`page_heading` on every page.** The `@mcp-b/global` polyfill registers a demo tool of
-   its own alongside ours. Harmless, not ours, not yet stripped.
-
----
-
-## Known rough edges — expected, not broken
-
-| | |
-|---|---|
-| Images are searchable only by their description | The engine is text-only. An uncaptioned image is refused rather than stored unfindable. |
-| Whole-page extraction is crude | `<article>`, else `<main>`, else body minus nav/header/footer. Beats selecting 2,000 words; not a Readability implementation. |
-| Screening misses some real conflicts | It nominates, you rule. One measured miss scored 0.659 against a 0.72 threshold. |
-| Screening over-flags | On purpose. An agent triaging first (§6) is what makes that affordable. |
-| Two separate memories | The extension and the web app do not share a corpus. Different origins. |
-| A one-word search scores 0.2 and is right | Short queries always score low. Trust the confidence label. |
-| `chrome-devtools-mcp` sees no extension tools | That harness does not inject our content scripts into its own pages. Use `pnpm ext:check` or `pnpm ext:relay`. |
-| The model download stalls behind Shields | One-time, `huggingface.co`. See Set up. |
-
----
-
-## Reference
-
-| | |
-|---|---|
-| Install and use the extension | `extension/README.md` |
-| Pick up the code | `HANDOFF.md` |
-| What the browser actually does | `lib/webmcp/API-DELTA.md` — 18 findings, each reproduced by running it |
-| Why the architecture is shaped this way | `autorag-build-plan.md` AD-5, `amendments.md` A7 |
+- **Scanned PDFs** need OCR. Not built.

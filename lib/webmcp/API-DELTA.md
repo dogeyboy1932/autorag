@@ -530,3 +530,53 @@ fulfilled.
 **Untested on Chrome.** Chrome 137+ ignores `--load-extension` from the command line, and
 `--disable-features=DisableLoadExtensionCommandLineSwitch` did not restore it here, so
 every measurement above is Brave. Whether Chrome also reserves `Ctrl+Shift+S` is unknown.
+
+---
+
+## D19. A PDF's text is in no DOM at all, so no extension can read a highlight in one
+
+Not a WebMCP finding, but the same shape as the rest of this file: a capability everything
+assumed was a permissions problem, measured and found to be structural.
+
+Highlighting text in a Chrome-rendered PDF and pressing Keep did nothing, and the message
+blamed the length of the selection. Chrome hands a PDF to **PDFium**, a C++ renderer that
+draws glyphs to a canvas. Measured on Chromium 152, with the whole document selected via
+`Ctrl+A` and read over CDP — which is strictly more access than an extension is granted:
+
+```
+frame                                                    getSelection()
+http://localhost:8899/doc.pdf              (top)         "" (len 0)
+chrome-extension://mhjfbmdgcf…/index.html  (the viewer)  "" (len 0)
+blob:http://localhost:8899/4f266f05-…      (relay embed) "" (len 0)
+http://localhost:8899/doc.pdf              (inner)       "" (len 0)
+```
+
+The content script *does* run on a PDF tab, and `document.modelContext` *does* install —
+the tab is not off limits. The text simply is not in any frame's DOM. So this is not
+fixable by a manifest key, a host permission, `allFrames`, or injecting into the viewer
+(which is another extension's page and therefore off limits regardless).
+
+Two detection notes, both of which produced wrong messages before they were understood:
+
+- **`document.contentType === 'application/pdf'` is the reliable signal**, not a `.pdf`
+  URL test. Measured: a PDF served from `/report` with no extension in the path reports
+  `application/pdf` while the URL says nothing.
+- **`document.title` is `''` on a PDF tab.** A `document.title || location.hostname`
+  fallback silently names every PDF after its host, so sources read `arxiv.org` rather
+  than the paper.
+
+**The consequence for design.** Extracting the PDF's bytes ourselves recovers the *words*
+and never the *selection*. The only way to make highlighting work is to stop using
+Chrome's viewer: `extension/src/reader/` renders the PDF with pdf.js, whose text layer is
+ordinary DOM, at which point the existing capture path works with no PDF branch in it.
+
+**The transferable part is the message, not the renderer.** For most of this project's
+life the failure was reported as "your selection is under 50 characters" — true about the
+string that was measured, wrong about the cause, and it sent people back to highlight
+harder. A component that can only see one layer of a failure should not narrate the cause;
+it should report what it observed and let something that knows more do the explaining.
+
+**Note for a later pdf.js upgrade:** `isEvalSupported` is gone in pdfjs-dist 6.x — font
+programs are evaluated in `quickjs-eval.wasm` instead, which MV3 permits under the
+`'wasm-unsafe-eval'` the manifest already carries for onnxruntime. Advice written against
+4.x/5.x will tell you to set it.
