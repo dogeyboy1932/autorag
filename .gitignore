@@ -1,8 +1,13 @@
 node_modules/
 .next/
 out/
-.env
-.env*.local
+# Every env file, then the documented examples back. `.env` and `.env*.local`
+# were the old patterns and they missed `.env2` — an allowlist is the right shape
+# here, because the cost of forgetting is a service key in a public repo and the
+# cost of an over-broad ignore is one `git add -f`.
+.env*
+!.env.example
+!.env.local.example
 .vercel
 *.tsbuildinfo
 next-env.d.ts
