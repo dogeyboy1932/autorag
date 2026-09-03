@@ -15,6 +15,7 @@
     "ext:zip": "node extension/zip.mjs",
     "ext:check": "node probes/extension-check.mjs",
     "ext:sync": "node probes/sync-check.mjs",
+    "dir:check": "node probes/directory-check.mjs",
     "bridge": "node extension/connector/serve.mjs",
     "ext:relay": "node probes/relay-check.mjs"
   },
