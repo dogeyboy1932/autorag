@@ -275,12 +275,46 @@ const tools = [
   },
 ];
 
+/**
+ * True on a page that publishes its own `autorag_*` tools — the Autorag web app.
+ *
+ * Both surfaces use the same tool names over *different* corpora: the app's
+ * lives in that page's IndexedDB, ours in the extension's offscreen document.
+ * Registering on top of it is wrong twice over. It throws `Tool already
+ * registered` for whichever ran second, and even if the names were disjoint it
+ * would hand an agent two memories under one roof with no way to tell which
+ * answered.
+ *
+ * The `<meta>` is in the served HTML, so it is there whichever script wins the
+ * race — the app registers from a React effect, we run at `document_idle`, and
+ * the order is not ours to decide. `getTools()` is the backstop for a build
+ * without the tag; it only helps when we lose the race, which is why it is not
+ * the primary check.
+ */
+async function pageOwnsSurface(ctx: { getTools?(): Promise<{ name?: string }[]> }) {
+  if (document.querySelector('meta[name="autorag-owns-modelcontext"]')) return true;
+  if (!ctx.getTools) return false;
+  try {
+    return (await ctx.getTools()).some((t) => t?.name?.startsWith('autorag_'));
+  } catch {
+    return false;
+  }
+}
+
 async function register() {
   // The polyfill installs itself on import, but defers to a native surface when
   // the browser already has one, so this reads whichever is in play.
-  const ctx = (document as unknown as { modelContext?: { registerTool(t: unknown): Promise<void> } })
-    .modelContext;
+  const ctx = (
+    document as unknown as {
+      modelContext?: {
+        registerTool(t: unknown): Promise<void>;
+        getTools?(): Promise<{ name?: string }[]>;
+      };
+    }
+  ).modelContext;
   if (!ctx?.registerTool) return;
+
+  if (await pageOwnsSurface(ctx)) return;
 
   for (const tool of tools) {
     try {
@@ -290,8 +324,8 @@ async function register() {
        * Never swallow this. An empty catch here cost a debugging cycle: one tool
        * silently failed to register and the surface simply came up one short,
        * with nothing anywhere saying why. A registration that fails is a bug in
-       * our schema every time — duplicates included, since a duplicate means we
-       * ran twice on one document.
+       * our schema every time — a duplicate now means either we ran twice on one
+       * document or something else on the page claimed an `autorag_` name.
        */
       console.error(`[autorag] failed to register ${tool.name}:`, err);
     }

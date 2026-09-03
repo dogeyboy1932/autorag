@@ -113,6 +113,19 @@ export async function registerGroup(
       // rethrowing leaves an unhandled AbortError in the console of a page whose
       // whole pitch is that its lifecycle handling is careful.
       if (controller.signal.aborted) return false;
+      /*
+       * A name we do not own. The Autorag extension used to hit this: it
+       * registers the same `autorag_*` names on every page it visits, this one
+       * included, and whichever lost the race threw here. That is fixed at the
+       * source — the extension stands down on a page carrying the
+       * `autorag-owns-modelcontext` meta tag — but any extension can claim a
+       * name, and losing one tool must not cost the other three in the group.
+       * Skip it, say so, keep going.
+       */
+      if (String((err as Error)?.message ?? err).includes('already registered')) {
+        console.error(`[autorag] ${tool.name} is already registered by something else — skipped`);
+        continue;
+      }
       throw err;
     }
     emit({ at: new Date().toISOString(), tool: tool.name, phase: 'registered' });
