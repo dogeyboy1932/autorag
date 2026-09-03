@@ -2,6 +2,7 @@
 
 import ActivityLog from '@/components/ActivityLog';
 import CorpusView from '@/components/CorpusView';
+import DemoMode from '@/components/DemoMode';
 import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
 import IngestForm from '@/components/IngestForm';
@@ -42,6 +43,7 @@ export default function Home() {
         {/* First, because until today the zip was served and nothing linked to it:
             someone landing here had no route to the half of the product that runs
             on the pages they actually read. */}
+        <DemoMode />
         <GetExtension />
         <IngestForm />
         <ReviewQueue />

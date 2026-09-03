@@ -191,6 +191,28 @@ export async function resolveSession(
   return { projectUrl: row.project_url, anonKey: row.anon_key };
 }
 
+/**
+ * The sessions anyone may join, for demo mode.
+ *
+ * Discovered rather than configured. The alternative was compiling a code into
+ * the build, which would have to be regenerated and redeployed every time the
+ * demo corpus was rebuilt — and would be wrong-and-silent in between, since a
+ * stale code resolves to nothing and looks exactly like a broken demo.
+ *
+ * The `visible_sessions` policy already lets an unauthenticated caller see rows
+ * with `open_join`, so this asks the directory what is open instead of being
+ * told. Nothing else is visible: a private session is not in this list, and its
+ * credentials are not reachable through it.
+ */
+export async function listOpenSessions(session?: Session): Promise<DirectorySession[]> {
+  const res = await fetch(
+    url('rest/v1/sessions?select=code,name,open_join,owner_user_id&open_join=is.true'),
+    { headers: headers(session?.accessToken) },
+  );
+  if (!res.ok) await fail(res);
+  return (await res.json()) as DirectorySession[];
+}
+
 /** Every session this person can see: theirs, ones they were invited to, and open ones. */
 export async function listSessions(session: Session): Promise<DirectorySession[]> {
   const res = await fetch(url('rest/v1/sessions?select=code,name,open_join,owner_user_id'), {

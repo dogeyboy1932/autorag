@@ -1527,6 +1527,7 @@ function Sessions({
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [invite, setInvite] = useState('');
+  const [openJoin, setOpenJoin] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<React.ReactNode>(null);
 
@@ -1632,6 +1633,7 @@ function Sessions({
                 kind: 'createSession',
                 cloud,
                 name: name.trim(),
+                openJoin,
               });
               setBusy(null);
               if (!res.ok) return setMsg(res.error);
@@ -1649,6 +1651,24 @@ function Sessions({
             {busy === 'creating' ? '…' : 'Create'}
           </button>
         </div>
+        {/*
+          The one switch here that cannot be taken back quietly. An open session is
+          readable by anyone who reaches the directory — that is the point for a
+          public demo, and wrong for everything else, so it is off by default and
+          says what it means rather than being called "public".
+        */}
+        <label className="note" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <input
+            type="checkbox"
+            checked={openJoin}
+            onChange={(e) => setOpenJoin(e.target.checked)}
+            style={{ marginTop: 2 }}
+          />
+          <span>
+            Open to anyone — no invite needed. Use this for a public demo corpus; anyone who
+            finds the directory can read and change it.
+          </span>
+        </label>
 
         <div className="row">
           <input

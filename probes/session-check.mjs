@@ -144,6 +144,7 @@ async function makeUser(env, email) {
 let A;
 let B;
 let code = null;
+let openCode = null;
 const users = [];
 
 try {
@@ -249,6 +250,75 @@ try {
     'B can recall what A kept',
     JSON.stringify(found?.hits?.length ?? 0),
   );
+  // ---- demo mode: a stranger with no account at all ------------------------
+  const openMade = await send(A.p, {
+    kind: 'createSession',
+    cloud: aCloud,
+    name: 'Probe Open',
+    openJoin: true,
+  });
+  ok(openMade?.ok && openMade.data?.code, 'A publishes a session open to anyone', openMade?.error);
+  openCode = openMade?.data?.code;
+
+  /*
+   * Not through a panel: demo mode runs in the web app, with no extension, no
+   * account and nothing but the directory's publishable key. Exercised the same
+   * way here — a bare fetch holding only that key.
+   */
+  const dirUrl = directory.SUPABASE_URL.replace(/\/$/, '');
+  const dirKey = directory.SUPABASE_PUBLISHABLE_KEY;
+  const anon = await (
+    await fetch(`${dirUrl}/auth/v1/signup`, {
+      method: 'POST',
+      headers: { apikey: dirKey, 'content-type': 'application/json' },
+      body: '{}',
+    })
+  ).json();
+  ok(Boolean(anon.access_token), 'a visitor with no account can sign in anonymously', anon.msg);
+  if (anon.user?.id) users.push({ env: directory, id: anon.user.id });
+
+  const anonHeaders = {
+    apikey: dirKey,
+    Authorization: `Bearer ${anon.access_token}`,
+    'content-type': 'application/json',
+  };
+  const openList = await (
+    await fetch(`${dirUrl}/rest/v1/sessions?select=code,name&open_join=is.true`, {
+      headers: anonHeaders,
+    })
+  ).json();
+  ok(
+    Array.isArray(openList) && openList.some((x) => x.code === openCode),
+    'the open session is discoverable without being told its code',
+    JSON.stringify(openList),
+  );
+  ok(
+    !openList.some((x) => x.code === code),
+    'the invite-only session is NOT in that list',
+    'PRIVATE SESSION EXPOSED TO DEMO VISITORS',
+  );
+
+  const demoCreds = await (
+    await fetch(`${dirUrl}/rest/v1/rpc/credentials_for`, {
+      method: 'POST',
+      headers: anonHeaders,
+      body: JSON.stringify({ session_code: openCode }),
+    })
+  ).json();
+  ok(demoCreds?.[0]?.project_url === CLOUD.url, 'demo mode gets the corpus credentials', JSON.stringify(demoCreds));
+
+  const deniedCreds = await (
+    await fetch(`${dirUrl}/rest/v1/rpc/credentials_for`, {
+      method: 'POST',
+      headers: anonHeaders,
+      body: JSON.stringify({ session_code: code }),
+    })
+  ).json();
+  ok(
+    Array.isArray(deniedCreds) && deniedCreds.length === 0,
+    'the same visitor is refused the invite-only session',
+    `LEAKED ${JSON.stringify(deniedCreds)}`,
+  );
 } catch (err) {
   ok(false, 'run completed', String(err));
 } finally {
@@ -259,13 +329,13 @@ try {
   await A?.b.close();
   await B?.b.close();
   try {
-    if (code) {
-      await admin(corpus, `rest/v1/chunks?session_id=eq.${code}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/sources?session_id=eq.${code}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/deletions?session_id=eq.${code}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/sessions?id=eq.${code}`, { method: 'DELETE' });
-      await admin(directory, `rest/v1/invites?session_code=eq.${code}`, { method: 'DELETE' });
-      await admin(directory, `rest/v1/sessions?code=eq.${code}`, { method: 'DELETE' });
+    for (const c of [code, openCode].filter(Boolean)) {
+      await admin(corpus, `rest/v1/chunks?session_id=eq.${c}`, { method: 'DELETE' });
+      await admin(corpus, `rest/v1/sources?session_id=eq.${c}`, { method: 'DELETE' });
+      await admin(corpus, `rest/v1/deletions?session_id=eq.${c}`, { method: 'DELETE' });
+      await admin(corpus, `rest/v1/sessions?id=eq.${c}`, { method: 'DELETE' });
+      await admin(directory, `rest/v1/invites?session_code=eq.${c}`, { method: 'DELETE' });
+      await admin(directory, `rest/v1/sessions?code=eq.${c}`, { method: 'DELETE' });
     }
     for (const u of users) {
       await admin(u.env, `rest/v1/profiles?user_id=eq.${u.id}`, { method: 'DELETE' }).catch(() => {});
