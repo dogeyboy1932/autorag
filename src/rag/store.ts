@@ -14,7 +14,7 @@ import type { Chunk, ChunkId, Conflict, Source, SourceId } from '@/src/types';
 import { emitCorpusChange } from './bus';
 
 const DB_NAME = 'autorag';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 interface AutoragDB extends DBSchema {
   sources: {
@@ -27,6 +27,19 @@ interface AutoragDB extends DBSchema {
     value: Chunk;
     indexes: { 'by-status': string; 'by-source': SourceId };
   };
+  /**
+   * Tombstones, and they are not bookkeeping — they are the difference between a
+   * memory that forgets and one that only appears to.
+   *
+   * A deletion is the one change that leaves no trace to sync. Push the rows you
+   * have and a forgotten source simply stays on the other device; pull them back
+   * and it returns. Someone who deliberately removed something would watch it
+   * reappear, which is worse than never having synced at all.
+   */
+  deletions: {
+    key: string;
+    value: { id: string; kind: 'source' | 'chunk'; at: string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<AutoragDB>> | null = null;
@@ -34,13 +47,18 @@ let dbPromise: Promise<IDBPDatabase<AutoragDB>> | null = null;
 function db(): Promise<IDBPDatabase<AutoragDB>> {
   if (!dbPromise) {
     dbPromise = openDB<AutoragDB>(DB_NAME, DB_VERSION, {
-      upgrade(database) {
-        const sources = database.createObjectStore('sources', { keyPath: 'id' });
-        sources.createIndex('by-url', 'url');
+      upgrade(database, from) {
+        if (from < 1) {
+          const sources = database.createObjectStore('sources', { keyPath: 'id' });
+          sources.createIndex('by-url', 'url');
 
-        const chunks = database.createObjectStore('chunks', { keyPath: 'id' });
-        chunks.createIndex('by-status', 'status');
-        chunks.createIndex('by-source', 'sourceId');
+          const chunks = database.createObjectStore('chunks', { keyPath: 'id' });
+          chunks.createIndex('by-status', 'status');
+          chunks.createIndex('by-source', 'sourceId');
+        }
+        // Added with cloud sync. Guarded by version rather than recreated, so an
+        // existing corpus survives the upgrade instead of being rebuilt empty.
+        if (from < 2) database.createObjectStore('deletions', { keyPath: 'id' });
       },
     });
   }
@@ -83,16 +101,41 @@ export async function setSourceStale(
   return next;
 }
 
-/** Destructive: removes the source and every chunk belonging to it. */
+/**
+ * Destructive: removes the source and every chunk belonging to it.
+ *
+ * Locally it is a real delete — the rows go. What survives is a tombstone, so a
+ * sync can tell "this was removed" apart from "this device has not seen it yet".
+ * Without that distinction the next pull would hand the source straight back.
+ */
 export async function deleteSourceCascade(id: SourceId): Promise<number> {
   const database = await db();
-  const tx = database.transaction(['sources', 'chunks'], 'readwrite');
+  const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
   const chunkIds = await tx.objectStore('chunks').index('by-source').getAllKeys(id);
-  for (const chunkId of chunkIds) await tx.objectStore('chunks').delete(chunkId);
+  const at = new Date().toISOString();
+  for (const chunkId of chunkIds) {
+    await tx.objectStore('chunks').delete(chunkId);
+    await tx.objectStore('deletions').put({ id: chunkId, kind: 'chunk', at });
+  }
   await tx.objectStore('sources').delete(id);
+  await tx.objectStore('deletions').put({ id, kind: 'source', at });
   await tx.done;
   emitCorpusChange();
   return chunkIds.length;
+}
+
+/** Every deletion this device knows about, for the sync layer to propagate. */
+export async function allDeletions(): Promise<{ id: string; kind: 'source' | 'chunk'; at: string }[]> {
+  return (await db()).getAll('deletions');
+}
+
+/** Records a deletion observed from another device, and applies it here. */
+export async function applyRemoteDeletion(id: string, kind: 'source' | 'chunk', at: string) {
+  const database = await db();
+  const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
+  await tx.objectStore(kind === 'source' ? 'sources' : 'chunks').delete(id);
+  await tx.objectStore('deletions').put({ id, kind, at });
+  await tx.done;
 }
 
 // ---------- chunks ----------
@@ -147,7 +190,25 @@ export async function decideChunks(
   const changed: ChunkId[] = [];
   for (const id of ids) {
     const chunk = await tx.store.get(id);
-    if (!chunk || chunk.status !== 'pending') continue;
+    if (!chunk) continue;
+    /*
+     * Which transitions are allowed, and why these:
+     *
+     *   pending  -> approved | rejected   the review decision
+     *   approved -> rejected              you kept it, and later it stopped
+     *                                     being worth keeping
+     *   rejected -> anything              never: its text is what future
+     *                                     screening matches against, so
+     *                                     resurrecting it would quietly change
+     *                                     what gets flagged
+     *
+     * Discarding something already approved used to be impossible — forgetting
+     * the entire source was the only route, which threw away every other passage
+     * from that page to remove one. Approving something twice is still a no-op.
+     */
+    const allowed =
+      chunk.status === 'pending' || (chunk.status === 'approved' && status === 'rejected');
+    if (!allowed) continue;
     tx.store.put({
       ...chunk,
       status,
@@ -184,10 +245,29 @@ export async function revisePendingChunk(
   }
   const database = await db();
   const chunk = await database.get('chunks', id);
-  if (!chunk || chunk.status !== 'pending') return undefined;
+  // Rejected passages stay put: their text is what future screening matches
+  // against, so editing one would quietly change what gets flagged later.
+  if (!chunk || chunk.status === 'rejected') return undefined;
+
+  /*
+   * Editing an approved passage returns it to the queue.
+   *
+   * Approval means a person read this and vouched for it. Letting the text change
+   * underneath that decision would make approval meaningless — the corpus would
+   * contain passages nobody had actually agreed to. But refusing outright was
+   * worse in practice: you notice a bad passage precisely when it comes back in a
+   * search, and being told "no" at that moment leaves you with forget-and-rekeep
+   * as the only route.
+   *
+   * So the edit is allowed and the vouching is withdrawn. Re-approve it and you
+   * have vouched for what it now says. Only a text change does this; adding a note
+   * annotates without altering what was approved.
+   */
+  const reopened = chunk.status === 'approved' && patch.text !== undefined;
 
   const next: Chunk = {
     ...chunk,
+    ...(reopened ? { status: 'pending' as const, decidedAt: undefined } : {}),
     ...(patch.text !== undefined ? { text: patch.text, embedding: patch.embedding! } : {}),
     ...(patch.conflicts !== undefined ? { conflicts: patch.conflicts } : {}),
     // An empty note clears it; undefined leaves whatever is there.
@@ -221,8 +301,21 @@ export async function annotateConflict(
 /** Test/demo affordance only — never exposed as a tool. */
 export async function wipeAll(): Promise<void> {
   const database = await db();
-  const tx = database.transaction(['sources', 'chunks'], 'readwrite');
+  const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
+  const at = new Date().toISOString();
+  /*
+   * Tombstone everything on the way out. A wipe that only cleared this device
+   * would be undone by the next pull — the most alarming possible bug, since the
+   * one thing a person doing this wants is for it to be gone everywhere.
+   */
+  for (const id of await tx.objectStore('sources').getAllKeys()) {
+    await tx.objectStore('deletions').put({ id, kind: 'source', at });
+  }
+  for (const id of await tx.objectStore('chunks').getAllKeys()) {
+    await tx.objectStore('deletions').put({ id, kind: 'chunk', at });
+  }
   await tx.objectStore('sources').clear();
   await tx.objectStore('chunks').clear();
   await tx.done;
+  emitCorpusChange();
 }
