@@ -16,6 +16,7 @@
     "ext:check": "node probes/extension-check.mjs",
     "ext:sync": "node probes/sync-check.mjs",
     "dir:check": "node probes/directory-check.mjs",
+    "sql:check": "node probes/sql-check.mjs",
     "bridge": "node extension/connector/serve.mjs",
     "ext:relay": "node probes/relay-check.mjs"
   },
