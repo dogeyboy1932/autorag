@@ -80,9 +80,19 @@ alter table deletions add column if not exists session_id text;
 -- session and no null case for a policy or a filter to forget. Rows kept before
 -- sessions existed join the personal one here; the default and the not-null then
 -- make it impossible to add another.
-insert into sessions (id, name, shared)
-  values ('personal', 'Personal', false)
-  on conflict (id) do nothing;
+--
+-- ## Why 'personal' gets no row in sessions
+--
+-- An earlier version of this file seeded one, and it could not work: this script
+-- runs in the SQL editor, where there is no signed-in user, so auth.uid() is null
+-- and the row failed sessions.user_id's not-null constraint.
+--
+-- Removing it is the fix rather than a workaround, because the row was never
+-- needed. A row in sessions exists to make a session *shareable* — the policies
+-- below consult it only through and s.shared. Private rows are reached by
+-- user_id = auth.uid(), which needs nothing in that table. So sessions holds
+-- exactly the sessions that were deliberately created to be shared, and those are
+-- inserted by the panel with a real JWT, where auth.uid() resolves.
 
 update sources   set session_id = 'personal' where session_id is null;
 update chunks    set session_id = 'personal' where session_id is null;
