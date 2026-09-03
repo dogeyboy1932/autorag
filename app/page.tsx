@@ -2,6 +2,7 @@
 
 import ActivityLog from '@/components/ActivityLog';
 import CorpusView from '@/components/CorpusView';
+import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
 import IngestForm from '@/components/IngestForm';
 import ReviewQueue from '@/components/ReviewQueue';
@@ -38,6 +39,10 @@ export default function Home() {
       </header>
 
       <div style={{ display: 'grid', gap: 16 }}>
+        {/* First, because until today the zip was served and nothing linked to it:
+            someone landing here had no route to the half of the product that runs
+            on the pages they actually read. */}
+        <GetExtension />
         <IngestForm />
         <ReviewQueue />
         <SearchPanel />

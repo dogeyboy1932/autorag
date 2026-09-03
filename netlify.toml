@@ -17,6 +17,17 @@
   command = "pnpm ext && pnpm ext:zip && pnpm build"
   publish = "out"
 
+[functions]
+  # The one place in this project that holds the author's Anthropic key. A static
+  # export has no server, so there is nowhere else a secret could live: anything
+  # in the bundle is readable by anyone who opens devtools.
+  #
+  # Needs ANTHROPIC_API_KEY, SUPABASE_URL and SUPABASE_SECRET_KEY set on the
+  # deploy (Site configuration → Environment variables). The last two are the
+  # *directory* project's, and the secret key is what lets the Function read a
+  # usage table nobody else can touch.
+  directory = "netlify/functions"
+
 [build.environment]
   # 22 rather than the image default so the toolchain is pinned: extension/zip.mjs
   # uses `zlib.crc32`, which landed in Node 20.15.
