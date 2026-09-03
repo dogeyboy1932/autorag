@@ -273,3 +273,41 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+/**
+ * Storage, on behalf of the offscreen document.
+ *
+ * An offscreen document is given `chrome.runtime` and very little else —
+ * `chrome.storage` is undefined there. Every read and write the offscreen
+ * document made was therefore throwing "Cannot read properties of undefined
+ * (reading 'local')", and because the only caller that mattered was a
+ * fire-and-forget `void autoSync()`, the rejection went nowhere: automatic sync
+ * had never once run, and reported nothing while not running.
+ *
+ * The service worker does have storage, so it does the reading. Kept as two
+ * dumb verbs rather than a typed API because the offscreen document already owns
+ * the meaning of what is stored; this end only needs to fetch and merge.
+ */
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== 'autorag:storage-get' && message?.type !== 'autorag:storage-set') return;
+  (async () => {
+    if (message.type === 'autorag:storage-get') {
+      sendResponse(await chrome.storage.local.get(message.key));
+      return;
+    }
+    // Merge rather than replace: callers patch one field of `cloud` and would
+    // otherwise silently drop the tokens sitting beside it.
+    const key = Object.keys(message.patch ?? {})[0];
+    if (key) {
+      const current = (await chrome.storage.local.get(key)) as Record<string, unknown>;
+      const value = message.patch[key];
+      const merged =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? { ...((current[key] as object) ?? {}), ...value }
+          : value;
+      await chrome.storage.local.set({ [key]: merged });
+    }
+    sendResponse({ ok: true });
+  })();
+  return true;
+});

@@ -70,7 +70,16 @@ export type Request =
    * this mirrors, it does not relocate.
    */
   | { kind: 'sync'; cloud: CloudSettings }
-  | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean };
+  | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean }
+  /** Every session this person can reach: their own, invited, and open ones. */
+  | { kind: 'listSessions'; cloud: CloudSettings }
+  /** Publish a new shared session backed by this person's own project. */
+  | { kind: 'createSession'; cloud: CloudSettings; name: string; openJoin?: boolean }
+  /** Redeem a code: resolve whose project holds it and start mirroring it. */
+  | { kind: 'joinSession'; cloud: CloudSettings; code: string }
+  | { kind: 'inviteToSession'; cloud: CloudSettings; code: string; email: string }
+  /** Move between sessions already reachable, including back to personal. */
+  | { kind: 'switchSession'; cloud: CloudSettings; sessionId: string };
 
 /** Where a synced corpus lives. Stored in chrome.storage.local, like the API key. */
 export interface CloudSettings {
@@ -79,6 +88,26 @@ export interface CloudSettings {
   accessToken?: string;
   refreshToken?: string;
   email?: string;
+  /** This person's id in their *own* project — what RLS scopes their rows by. */
+  userId?: string;
+  /**
+   * The directory account: who this person is for the purpose of owning sessions
+   * and receiving invites.
+   *
+   * Separate from the corpus sign-in above and necessarily so — auth users are
+   * per-project, so the id here is unrelated to the one scoping their passages.
+   * Both are obtained from one email and password, because being asked to hold
+   * two accounts in your head is not a thing this feature is worth.
+   */
+  directory?: { accessToken: string; refreshToken: string; userId: string };
+  /**
+   * Whose project the active session actually lives in.
+   *
+   * Joining someone else's session means reading and writing *their* database, so
+   * url and anonKey above are not enough on their own. Absent means the session is
+   * this person's own and the credentials above apply.
+   */
+  host?: { url: string; anonKey: string; name: string };
   /**
    * The shared session being mirrored; absent means the private corpus.
    *

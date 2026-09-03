@@ -96,8 +96,72 @@ export async function signInAnonymously(): Promise<Session> {
     }
     throw new Error(body.msg ?? `HTTP ${res.status}`);
   }
-  const body = (await res.json()) as { access_token: string; refresh_token: string };
-  return { accessToken: body.access_token, refreshToken: body.refresh_token, email: '' };
+  const body = (await res.json()) as {
+    access_token: string;
+    refresh_token: string;
+    user?: { id?: string };
+  };
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    email: '',
+    userId: body.user?.id ?? '',
+  };
+}
+
+/**
+ * Signs in to the directory, creating the account if it is not there yet.
+ *
+ * A person has two accounts and should never be asked to think about it: one in
+ * their own corpus project, which is what row-level security scopes their
+ * passages by, and one here, which is what owns sessions and receives invites.
+ * Auth users are per-project, so these are genuinely different users that happen
+ * to share an email and password.
+ *
+ * Try-then-create rather than asking which they want. Whether the directory
+ * account exists is an artefact of whether they have used sessions before, which
+ * is not something anyone can be expected to remember, and the failure for
+ * guessing wrong is 'Invalid login credentials' — an error about a password that
+ * was never wrong.
+ */
+export async function signInOrUp(email: string, password: string): Promise<Session> {
+  const attempt = async (path: string) => {
+    const res = await fetch(url(`auth/v1/${path}`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: DIRECTORY.publishableKey },
+      body: JSON.stringify({ email, password }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      access_token?: string;
+      refresh_token?: string;
+      user?: { id?: string };
+      msg?: string;
+      message?: string;
+    };
+    return { ok: res.ok, body };
+  };
+
+  let r = await attempt('token?grant_type=password');
+  if (!r.ok || !r.body.access_token) r = await attempt('signup');
+  if (!r.body.access_token) {
+    const detail = r.body.msg ?? r.body.message ?? 'could not sign in';
+    /*
+     * A directory with "Confirm email" left on returns a user and no session, and
+     * the link it mails points at a Site URL nothing serves. Reported as the
+     * setting it is rather than as a login failure.
+     */
+    throw new Error(
+      /confirm/i.test(detail)
+        ? 'The directory project requires email confirmation. Turn off Confirm email in its Authentication → Sign In / Providers → Email settings.'
+        : `Directory sign-in failed: ${detail}`,
+    );
+  }
+  return {
+    accessToken: r.body.access_token,
+    refreshToken: r.body.refresh_token ?? '',
+    email,
+    userId: r.body.user?.id ?? '',
+  };
 }
 
 /**

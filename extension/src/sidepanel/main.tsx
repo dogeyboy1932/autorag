@@ -927,7 +927,14 @@ function Memory({
     setBusy(create ? 'creating' : 'signing in');
     setMsg(null);
     const next = { ...cloud, url: url.trim(), anonKey: key.trim() };
-    const res = await askDetailed<{ accessToken: string; refreshToken: string; email: string }>({
+    const res = await askDetailed<{
+      accessToken: string;
+      refreshToken: string;
+      email: string;
+      userId: string;
+      directory?: { accessToken: string; refreshToken: string; userId: string };
+      directoryError?: string;
+    }>({
       kind: 'cloudSignIn',
       cloud: next,
       email: email.trim(),
@@ -948,9 +955,23 @@ function Memory({
     });
     setBusy(null);
     setMsg(
-      first.ok
-        ? `Signed in and synced — ${first.data.pushed} row(s) up, ${first.data.pulled} down.`
-        : `Signed in, but the first sync failed: ${first.error}`,
+      <>
+        {first.ok
+          ? `Signed in and synced — ${first.data.pushed} row(s) up, ${first.data.pulled} down.`
+          : `Signed in, but the first sync failed: ${first.error}`}
+        {/*
+          Said out loud rather than left to be discovered. Without a directory
+          account nothing about the corpus is broken, but every session this
+          person creates resolves to nothing for everyone they give the code to —
+          and they would have no way to tell that from the other side.
+        */}
+        {res.data.directoryError && (
+          <>
+            <br />
+            Sessions are unavailable: {res.data.directoryError}
+          </>
+        )}
+      </>,
     );
     onSynced();
   }
@@ -1484,6 +1505,216 @@ function Recall({ settings }: { settings: AskSettings }) {
  * The badge on Library is the only thing that pulls for attention, and only when
  * something is actually waiting.
  */
+
+/**
+ * Sessions: which corpus you are keeping into, and who else is in it.
+ *
+ * The heading always says whose database you are writing to, and that is not
+ * decoration. Joining someone else's session means every passage you keep lands in
+ * *their* project — the one thing here a person could do without realising, and
+ * the one thing they cannot undo from their own machine.
+ */
+function Sessions({
+  cloud,
+  save,
+  onSwitched,
+}: {
+  cloud: CloudSettings;
+  save: (next: CloudSettings) => void;
+  onSwitched: () => void;
+}) {
+  const [list, setList] = useState<{ code: string; name: string; open_join: boolean }[]>([]);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [invite, setInvite] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<React.ReactNode>(null);
+
+  const active = cloud.sessionId ?? 'personal';
+  const hosted = Boolean(cloud.host);
+
+  const refresh = useCallback(async () => {
+    if (!cloud.directory) return;
+    const res = await askDetailed<{ code: string; name: string; open_join: boolean }[]>({
+      kind: 'listSessions',
+      cloud,
+    });
+    if (res.ok) setList(res.data);
+  }, [cloud]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!cloud.directory) {
+    return (
+      <section>
+        <h2>
+          Sessions <span className="soft">sign in first</span>
+        </h2>
+        <div className="card">
+          <p className="note">
+            A session lets several people share one memory. Connect a Supabase project
+            above and sign in, and your sessions appear here.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  /* Switching is two writes and a sync: remember where we are now, then reconcile. */
+  async function go(next: CloudSettings, label: string) {
+    setBusy(label);
+    save(next);
+    const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
+    setBusy(null);
+    setMsg(res.ok ? `Now in ${label} — ${res.data.pulled} passage(s) pulled.` : res.error);
+    onSwitched();
+  }
+
+  return (
+    <section>
+      <h2>
+        Sessions{' '}
+        <span className="soft">
+          {active === 'personal' ? 'personal — only you' : hosted ? `${active} — hosted by someone else` : active}
+        </span>
+      </h2>
+      <div className="card">
+        {hosted && (
+          <p className="note bad">
+            You are keeping into <strong>someone else&rsquo;s</strong> project. Everything you
+            approve here is readable by everyone in this session.
+          </p>
+        )}
+
+        <div className="row">
+          <button
+            disabled={active === 'personal' || busy !== null}
+            onClick={() =>
+              void go({ ...cloud, sessionId: undefined, host: undefined }, 'personal')
+            }
+          >
+            {active === 'personal' ? 'In your personal memory' : 'Back to personal'}
+          </button>
+        </div>
+
+        {list.length > 0 && (
+          <ul className="sessions">
+            {list.map((x) => (
+              <li key={x.code}>
+                <span>
+                  {x.name} <code>{x.code}</code>
+                </span>
+                <button
+                  disabled={active === x.code || busy !== null}
+                  onClick={() => void go({ ...cloud, sessionId: x.code }, x.name)}
+                >
+                  {active === x.code ? 'current' : 'switch'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="row">
+          <input
+            placeholder="new session name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            disabled={!name.trim() || busy !== null}
+            onClick={async () => {
+              setBusy('creating');
+              setMsg(null);
+              const res = await askDetailed<{ code: string; name: string }>({
+                kind: 'createSession',
+                cloud,
+                name: name.trim(),
+              });
+              setBusy(null);
+              if (!res.ok) return setMsg(res.error);
+              setName('');
+              setMsg(
+                <>
+                  Created <strong>{res.data.name}</strong>. Its code is{' '}
+                  <code>{res.data.code}</code> — invite by email below rather than passing the
+                  code around, since anyone holding a code can join.
+                </>,
+              );
+              void refresh();
+            }}
+          >
+            {busy === 'creating' ? '…' : 'Create'}
+          </button>
+        </div>
+
+        <div className="row">
+          <input
+            placeholder="join by code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+          />
+          <button
+            disabled={!code.trim() || busy !== null}
+            onClick={async () => {
+              setBusy('joining');
+              setMsg(null);
+              const res = await askDetailed<{
+                code: string;
+                host: { url: string; anonKey: string; name: string };
+              }>({ kind: 'joinSession', cloud, code: code.trim() });
+              setBusy(null);
+              if (!res.ok) return setMsg(res.error);
+              setCode('');
+              await go({ ...cloud, sessionId: res.data.code, host: res.data.host }, res.data.code);
+              void refresh();
+            }}
+          >
+            {busy === 'joining' ? '…' : 'Join'}
+          </button>
+        </div>
+
+        {active !== 'personal' && !hosted && (
+          <div className="row">
+            <input
+              placeholder="invite an email address"
+              value={invite}
+              onChange={(e) => setInvite(e.target.value)}
+            />
+            <button
+              disabled={!invite.trim() || busy !== null}
+              onClick={async () => {
+                setBusy('inviting');
+                setMsg(null);
+                const res = await askDetailed({
+                  kind: 'inviteToSession',
+                  cloud,
+                  code: active,
+                  email: invite.trim(),
+                });
+                setBusy(null);
+                setMsg(res.ok ? `Invited ${invite.trim()}.` : res.error);
+                if (res.ok) setInvite('');
+              }}
+            >
+              {busy === 'inviting' ? '…' : 'Invite'}
+            </button>
+          </div>
+        )}
+
+        <p className="note">
+          Everyone in a session reads every passage in it. An invite is safer than a code:
+          a code is a bearer token, while an invite releases your project&rsquo;s
+          credentials only to the address you named.
+        </p>
+        {msg && <p className="note">{msg}</p>}
+      </div>
+    </section>
+  );
+}
+
 type Tab = 'ask' | 'library' | 'settings';
 
 /** When cloud sync last succeeded, or what went wrong. */
@@ -1591,6 +1822,8 @@ function App() {
         <AnswerSettings settings={settings} save={saveSettings} />
         <hr />
         <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
+        <hr />
+        <Sessions cloud={cloud} save={saveCloud} onSwitched={refresh} />
         <hr />
         <Activity />
       </div>

@@ -296,3 +296,28 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .composer-meta label { display: flex; align-items: center; gap: 5px; cursor: pointer;
   white-space: nowrap; }
 .composer-meta input[type='checkbox'] { flex: none; width: auto; margin: 0; }
+
+/* The session list. Code shown beside the name because it is the thing people
+   read out to each other, and hiding it behind a click made it feel unavailable. */
+ul.sessions {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+ul.sessions li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+ul.sessions code {
+  opacity: 0.65;
+  font-size: 11px;
+}

@@ -31,6 +31,16 @@ import { env } from '@huggingface/transformers';
 import { isEnvelope, type CloudSettings, type Event, type Request, type Response } from '../protocol';
 import { askModel, standaloneQuery } from './answer';
 import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
+import {
+  directoryConfigured,
+  inviteToSession,
+  listSessions,
+  publishProfile,
+  publishSession,
+  resolveSession,
+  signInOrUp,
+} from '@/src/rag/directory';
+import { createLocalSession } from '@/src/rag/sessions';
 import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
 import type { Conflict } from '@/src/types';
 
@@ -90,11 +100,21 @@ async function handle(request: Request): Promise<unknown> {
     case 'ingest': {
       const words = request.text.trim().split(/\s+/).length;
       record('working', `Reading ${words} words from ${hostOf(request.sourceUrl)}`);
+      /*
+       * Kept into whichever session is active, read here rather than passed in by
+       * the caller. Capture arrives from four places — the Keep button, the
+       * context menu, a keyboard shortcut and an agent tool — and threading the
+       * active session through all four would mean four chances for one of them to
+       * keep into the wrong corpus. The offscreen document owns the corpus, so it
+       * is the right place to know which part of it is open.
+       */
+      const active = (await cloudSettings())?.sessionId;
       const result = await ingestPassage({
         text: request.text,
         sourceUrl: request.sourceUrl,
         title: request.title,
         tags: request.tags,
+        sessionId: active,
       });
       const n = result.conflicts.length;
       record(
@@ -162,8 +182,152 @@ async function handle(request: Request): Promise<unknown> {
       const session = request.create
         ? await signUp(cfg, request.email, request.password)
         : await signIn(cfg, request.email, request.password);
-      record('done', `Signed in to cloud memory as ${request.email}`);
-      return session;
+
+      /*
+       * Register with the directory in the same breath, and do not fail the
+       * sign-in if it does not work.
+       *
+       * `credentials_for` reads `profiles`, so without a row there nobody can
+       * resolve a session this person hosts — they would create one, hand out the
+       * code, and watch it fail for everyone with no indication why. Publishing it
+       * at sign-in is the only moment we are certainly holding their project's
+       * credentials and their password at once.
+       *
+       * It is best-effort because the directory is a convenience and the corpus is
+       * the product. A directory that is down, paused, or misconfigured must not
+       * stop someone signing in to their own memory; it costs them sessions until
+       * it recovers, and the panel says so rather than pretending.
+       */
+      let directory: { accessToken: string; refreshToken: string; userId: string } | undefined;
+      let note = '';
+      if (directoryConfigured()) {
+        try {
+          const dir = await signInOrUp(request.email, request.password);
+          await publishProfile(dir, {
+            userId: dir.userId,
+            email: request.email,
+            cloud: { url: cfg.url, anonKey: cfg.anonKey },
+          });
+          directory = {
+            accessToken: dir.accessToken,
+            refreshToken: dir.refreshToken,
+            userId: dir.userId,
+          };
+        } catch (err) {
+          note = ` (sessions unavailable: ${err instanceof Error ? err.message : String(err)})`;
+        }
+      }
+      record('done', `Signed in to cloud memory as ${request.email}${note}`);
+      return { ...session, directory, directoryError: note.trim() || undefined };
+    }
+
+    case 'listSessions': {
+      const dir = request.cloud.directory;
+      if (!dir) throw new Error('Not signed in, so there are no sessions to list.');
+      return await listSessions({
+        accessToken: dir.accessToken,
+        refreshToken: dir.refreshToken,
+        email: request.cloud.email ?? '',
+        userId: dir.userId,
+      });
+    }
+
+    case 'createSession': {
+      const dir = request.cloud.directory;
+      if (!dir) throw new Error('Sign in first — a session needs an owner.');
+      if (!request.cloud.url || !request.cloud.anonKey) {
+        throw new Error('Connect your own Supabase project first; a session is stored in it.');
+      }
+      /*
+       * Short and unambiguous. No 0/O or 1/I, because this gets read aloud and
+       * typed by hand, and a code that cannot be dictated is not shareable.
+       */
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const code = Array.from(
+        crypto.getRandomValues(new Uint8Array(8)),
+        (n) => alphabet[n % alphabet.length],
+      ).join('');
+      const dirSession = {
+        accessToken: dir.accessToken,
+        refreshToken: dir.refreshToken,
+        email: request.cloud.email ?? '',
+        userId: dir.userId,
+      };
+      await publishSession(dirSession, {
+        code,
+        name: request.name,
+        openJoin: request.openJoin,
+        ownerUserId: dir.userId,
+      });
+      /*
+       * The corpus-side row is what actually authorises reads. The directory only
+       * says the code exists; `sessions.shared` in the owner's own project is the
+       * flag every policy there consults.
+       */
+      await createLocalSession(
+        { url: request.cloud.url, anonKey: request.cloud.anonKey },
+        {
+          accessToken: request.cloud.accessToken!,
+          refreshToken: request.cloud.refreshToken!,
+          email: request.cloud.email ?? '',
+          userId: request.cloud.userId ?? '',
+        },
+        { id: code, name: request.name, shared: true },
+      );
+      record('done', `Created session ${request.name} (${code})`);
+      return { code, name: request.name };
+    }
+
+    case 'joinSession': {
+      const dir = request.cloud.directory;
+      const code = request.code.trim().toUpperCase();
+      const resolved = await resolveSession(
+        code,
+        dir
+          ? {
+              accessToken: dir.accessToken,
+              refreshToken: dir.refreshToken,
+              email: request.cloud.email ?? '',
+              userId: dir.userId,
+            }
+          : undefined,
+      );
+      /*
+       * One message for "no such code" and for "not yours to join", because
+       * `credentials_for` deliberately does not distinguish them — telling them
+       * apart would make this an oracle for which codes are real.
+       */
+      if (!resolved) {
+        throw new Error(
+          'No session with that code, or you have not been invited to it. Ask the owner to invite your email address.',
+        );
+      }
+      record('done', `Joined session ${code}`);
+      return { code, host: { url: resolved.projectUrl, anonKey: resolved.anonKey, name: code } };
+    }
+
+    case 'inviteToSession': {
+      const dir = request.cloud.directory;
+      if (!dir) throw new Error('Sign in first.');
+      await inviteToSession(
+        {
+          accessToken: dir.accessToken,
+          refreshToken: dir.refreshToken,
+          email: request.cloud.email ?? '',
+          userId: dir.userId,
+        },
+        request.code,
+        request.email,
+      );
+      record('done', `Invited ${request.email} to ${request.code}`);
+      return { ok: true };
+    }
+
+    case 'switchSession': {
+      // Nothing to do here beyond acknowledging: the panel stores the new active
+      // session and the sync that follows is what actually moves the corpus.
+      record('done', `Switched to ${request.sessionId}`);
+      return { sessionId: request.sessionId };
     }
 
     case 'ask': {
@@ -511,6 +675,24 @@ let firstPendingChange = 0;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncing = false;
 
+/**
+ * `chrome.storage` does not exist in an offscreen document — it gets
+ * `chrome.runtime` and a short list of others, and nothing warns you. Reads and
+ * writes here go through the service worker, which does have it. See the handler
+ * in background.ts for what this cost before it was noticed.
+ */
+const storage = {
+  async get<T>(key: string): Promise<T | undefined> {
+    const v = (await chrome.runtime.sendMessage({ type: 'autorag:storage-get', key })) as
+      | Record<string, T>
+      | undefined;
+    return v?.[key];
+  },
+  async set(patch: Record<string, unknown>): Promise<void> {
+    await chrome.runtime.sendMessage({ type: 'autorag:storage-set', patch });
+  },
+};
+
 async function cloudSettings() {
   /*
    * Typed as `CloudSettings` rather than re-describing the shape inline. There
@@ -519,8 +701,7 @@ async function cloudSettings() {
    * while reporting that it had pushed rows to a shared session. One name means
    * a new field is a compile error at every call site instead of a no-op.
    */
-  const v = (await chrome.storage.local.get('cloud')) as { cloud?: CloudSettings };
-  const c = v.cloud;
+  const c = await storage.get<CloudSettings>('cloud');
   if (!c?.url || !c.anonKey || !c.accessToken || !c.refreshToken) return null;
   return c;
 }
@@ -540,8 +721,22 @@ async function syncWithRenewal(
   c: NonNullable<Awaited<ReturnType<typeof cloudSettings>>>,
   onProgress?: (m: string) => void,
 ) {
-  const cfg = { url: c.url, anonKey: c.anonKey, ...(c.sessionId ? { sessionId: c.sessionId } : {}) };
-  const session = { accessToken: c.accessToken!, refreshToken: c.refreshToken!, email: c.email ?? '' };
+  /*
+   * A joined session lives in its host's project, so the credentials that reach it
+   * are theirs and not this person's. `host` is absent for your own sessions,
+   * where your own project is the right target.
+   */
+  const cfg = {
+    url: c.host?.url ?? c.url,
+    anonKey: c.host?.anonKey ?? c.anonKey,
+    ...(c.sessionId ? { sessionId: c.sessionId } : {}),
+  };
+  const session = {
+    accessToken: c.accessToken!,
+    refreshToken: c.refreshToken!,
+    email: c.email ?? '',
+    userId: c.userId ?? '',
+  };
   try {
     return await syncNow(cfg, session, onProgress);
   } catch (err) {
@@ -549,7 +744,7 @@ async function syncWithRenewal(
     if (!/jwt|expired|invalid token|401/i.test(message)) throw err;
     record('working', 'Session expired — renewing');
     const renewed = await refreshSession(cfg, session);
-    await chrome.storage.local.set({
+    await storage.set({
       cloud: { ...c, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
     });
     return await syncNow(cfg, renewed, onProgress);
@@ -566,7 +761,7 @@ async function autoSync() {
     // Written whether or not anything moved, so the panel can say when it last
     // succeeded. A sync that runs and reports nothing is indistinguishable from a
     // sync that never ran.
-    await chrome.storage.local.set({ lastSyncAt: Date.now(), lastSyncError: '' });
+    await storage.set({ lastSyncAt: Date.now(), lastSyncError: '' });
     if (result.pulled || result.deleted) {
       record('done', `Synced — ${result.pulled} new, ${result.deleted} removed elsewhere`);
       emitCorpusChange();
@@ -576,7 +771,7 @@ async function autoSync() {
     // empty while everything looked fine.
     const message = err instanceof Error ? err.message : String(err);
     record('failed', `Cloud sync failed — ${message}`);
-    await chrome.storage.local.set({ lastSyncError: message });
+    await storage.set({ lastSyncError: message });
   } finally {
     syncing = false;
   }

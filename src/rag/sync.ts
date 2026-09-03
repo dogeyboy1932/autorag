@@ -64,6 +64,16 @@ export interface Session {
   accessToken: string;
   refreshToken: string;
   email: string;
+  /**
+   * The signed-in user's id *in the project this session belongs to*.
+   *
+   * Worth stating because it is the thing most likely to be mixed up: auth users
+   * are per-project, so the id you get from your own corpus project is unrelated
+   * to the id you get from the directory. Sessions and profiles are keyed by the
+   * directory's; rows in your corpus are keyed by your project's. Passing one
+   * where the other belongs fails as silently as a lookup that finds nothing.
+   */
+  userId: string;
 }
 
 const rest = (c: CloudConfig, path: string) => `${c.url.replace(/\/$/, '')}/rest/v1/${path}`;
@@ -119,8 +129,17 @@ export async function signIn(c: CloudConfig, email: string, password: string): P
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) await fail(res);
-  const body = (await res.json()) as { access_token: string; refresh_token: string };
-  return { accessToken: body.access_token, refreshToken: body.refresh_token, email };
+  const body = (await res.json()) as {
+    access_token: string;
+    refresh_token: string;
+    user?: { id?: string };
+  };
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    email,
+    userId: body.user?.id ?? '',
+  };
 }
 
 export async function signUp(c: CloudConfig, email: string, password: string): Promise<Session> {
@@ -133,6 +152,7 @@ export async function signUp(c: CloudConfig, email: string, password: string): P
   const body = (await res.json()) as {
     access_token?: string;
     refresh_token?: string;
+    user?: { id?: string };
   };
   if (!body.access_token) {
     /*
@@ -149,7 +169,12 @@ export async function signUp(c: CloudConfig, email: string, password: string): P
       'Account created, but the project requires email confirmation — and the link points at http://localhost:3000, where nothing is listening. In Supabase: Authentication → Sign In / Providers → Email → turn off "Confirm email", then Sign in here.',
     );
   }
-  return { accessToken: body.access_token, refreshToken: body.refresh_token!, email };
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token!,
+    email,
+    userId: body.user?.id ?? '',
+  };
 }
 
 export async function refresh(c: CloudConfig, session: Session): Promise<Session> {
