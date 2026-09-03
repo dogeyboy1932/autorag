@@ -30,10 +30,22 @@ for rather than guess:
 
 | | |
 |---|---|
-| Netlify site name / live URL | not yet created — Step 2d |
-| Directory Supabase project URL + anon key | not yet created — Step 3 |
+| Netlify live URL | **<https://autorag-web.netlify.app/>** — live, auto-deploys from `main` |
+| Owner Supabase project | in `.env` (gitignored) — schema applied, RLS verified. See §0. |
+| Directory Supabase project URL + anon key | **still not created** — Step 3 |
 | `ANTHROPIC_API_KEY` for the demo function | env var on Netlify, never in the repo |
 | Demo session join code | generated once the directory exists |
+
+**`.env` is gitignored and has never been committed** — verified against every commit, not
+just the tip. It holds `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` and
+`SUPABASE_JWKS_URL`; `.env.example` documents what each is for without the values. Nothing in
+the code reads them yet — the extension takes its cloud config from the panel's Settings tab.
+
+**The secret key must never reach a browser.** None of these carry the `NEXT_PUBLIC_` prefix,
+so Next cannot inline them into the static export even if they are set in Netlify's UI, and
+that is the only thing standing between the service key and a bundle anyone can read. When
+Step 4 adds `netlify/functions/ask.ts`, a Function is the first place in this project where a
+secret can legitimately be read — do not let the habit leak back into `app/`.
 
 A screenshot preview of the current UI is published at
 `https://claude.ai/code/artifact/5a80e800-b470-4170-85ec-00a3f83af65c`, and PNGs are in
@@ -54,9 +66,23 @@ way `probes/extension-check.mjs` does.
 | the web app | driven by hand at last — **0 console errors**, 5 tools on `document.modelContext` |
 | HUMAN-TASKS | reported passing by hand for the **pre-session** build. **Rewrite it after Step 5 — see Step 6.** |
 
-**Steps 1, 2a, 2b and 2c are done and pushed.** The working tree is clean. Step 2d — the
-Netlify site — is the only thing left before Step 3, and it is waiting on the author to
-connect the repo in the Netlify UI and hand back the origin.
+**Step 1 and the whole of Step 2 are done.** The working tree is clean and
+<https://autorag-web.netlify.app/> is live, auto-deploying from `main`. **Step 3 is next.**
+
+Verified against the deployed site rather than assumed:
+
+- **0 console errors, page errors and failed requests**, both with the extension loaded and
+  without it. 5 `autorag_*` tools, no duplicates — so the stand-down holds on the real origin,
+  not just on localhost.
+- **The embedding model loads** (`model ready · wasm`), which is the live confirmation that
+  leaving COOP/COEP off was right. With them on, this is the line that would have hung.
+- **`netlify.toml` is being applied** — the zip comes back with the `Content-Disposition` and
+  `Cache-Control` set there.
+- **The downloadable zip is byte-identical to the local build**, `unzip -t` clean, and extracts
+  to exactly the `extension/dist` that passed 48/48. What a judge downloads is what was tested.
+
+**Missing, and it is a Step 4 item rather than a regression:** the page has no link to
+`/autorag-extension.zip`. The file is served correctly; nothing points at it yet.
 
 Two things were confirmed by driving the built `out/` in a real browser, both of which the
 previous session had flagged as unverified:
@@ -295,7 +321,47 @@ correct and simply never finish loading its model. `netlify.toml` says so in pla
 A **session** is a corpus several people share. Everyone keeps their **own** Supabase project,
 so corpora are private by default; a small **directory project you host** makes them findable.
 
-#### Directory project (yours) — run once
+#### What already exists, measured rather than assumed
+
+The project in `.env` is an **owner project — not the directory.** Probed over PostgREST:
+
+| table | anon (publishable key) | admin (secret key) |
+|---|---|---|
+| `sources` · `chunks` · `deletions` | `200 []` | `200`, **2 rows each** |
+| `sessions` · `profiles` · `invites` · `demo_usage` | `404 PGRST205` | `404` |
+
+Two things follow, and the second is the one that saves time.
+
+**`SCHEMA_SQL` is already applied and RLS genuinely works.** Admin sees 2 rows where anon sees
+none — which is proof, where `200 []` on an empty table would have been the same vacuous green
+this repo has shipped three times before. There is a small real corpus in there; do not treat
+it as scratch.
+
+**The directory does not exist.** All four of its tables 404, so every line of the SQL below
+still has to be run, in a **second** project.
+
+**Keep them separate, and this is a security property rather than tidiness.** A join code
+hands someone your project's publishable key. If the directory tables lived in the same
+project, that key would also address `profiles` — the table holding *other people's* Supabase
+credentials — and the only thing between them would be RLS policies that §"Known limit" below
+already admits are imperfect for shared sessions. Two projects means the corpus key cannot
+name the credential table at all.
+
+#### The API keys are the new scheme, and it matters
+
+This project issues `sb_publishable_…` / `sb_secret_…` with a JWKS URL, not the legacy
+`anon` / `service_role` JWTs. Checked rather than assumed, because it would have been a
+confusing failure to discover halfway through Step 3:
+
+- **The existing `sync.ts` works unchanged.** Its `apikey` + `Authorization: Bearer` headers
+  authenticate fine with a publishable key — a live `select` on `sources` returned 200.
+- `auth.uid()` and `auth.jwt() ->> 'email'` still behave as the policies below expect; they
+  read the request's JWT, and asymmetric signing does not change that.
+- One asymmetry to know: the OpenAPI root (`/rest/v1/`) now **refuses** a publishable key
+  ("Only secret API keys can be used for this endpoint"), so introspecting the schema is not
+  something client code can do any more. Query a table to test reachability instead.
+
+#### Directory project (yours) — run once, in a NEW project
 
 ```sql
 create table profiles (
