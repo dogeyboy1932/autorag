@@ -1,0 +1,39 @@
+# Netlify deploy configuration.
+#
+# The app is a static export (`output: 'export'` in next.config.mjs), so there is
+# no adapter and no server — Netlify serves `out/` as files. That is a deliberate
+# property rather than a simplification: the whole engine runs in the browser,
+# and a build that cannot accidentally grow a server cannot accidentally grow a
+# place to put someone's corpus.
+
+[build]
+  # The extension is built and packed here rather than committed. `output:
+  # 'export'` copies `public/` into `out/`, so the zip lands at
+  # `/autorag-extension.zip` with no route to write and nothing to keep in sync.
+  #
+  # Order matters: `ext` produces extension/dist, `ext:zip` packs it into
+  # public/, and only then does `build` copy public/ into out/. Running `build`
+  # first would publish a site whose download link 404s.
+  command = "pnpm ext && pnpm ext:zip && pnpm build"
+  publish = "out"
+
+[build.environment]
+  # 22 rather than the image default so the toolchain is pinned: extension/zip.mjs
+  # uses `zlib.crc32`, which landed in Node 20.15.
+  NODE_VERSION = "22"
+
+# NOTE: COOP/COEP are deliberately NOT set here, for the same reason
+# next.config.mjs gives. They would enable SharedArrayBuffer and multi-threaded
+# WASM, but they would also block the cross-origin Hugging Face fetch that
+# downloads the embedding model, because that CDN does not send CORP. The app
+# would come up looking fine and never finish loading its model. WebGPU with a
+# single-threaded WASM fallback is the trade we want.
+
+[[headers]]
+  for = "/autorag-extension.zip"
+  [headers.values]
+    # Named so it does not land in Downloads as a hash, and not cached hard: the
+    # zip is rebuilt on every deploy and someone who downloads a stale one gets
+    # an extension that disagrees with the site it came from.
+    Content-Disposition = "attachment; filename=\"autorag-extension.zip\""
+    Cache-Control = "public, max-age=0, must-revalidate"
