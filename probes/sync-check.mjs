@@ -34,13 +34,29 @@ const server = http.createServer(async (req, res) => {
   }
   const t = tables[name];
   if (!t) { res.writeHead(404); return res.end('{}'); }
+  /*
+   * Honour `session_id`, because the alternative is a check that cannot fail.
+   *
+   * This stub ignored the query string entirely, so every select returned every
+   * row and the session scoping added on top of it was never exercised — the
+   * suite went green while the one bug that actually matters here, a private
+   * passage leaking into a shared session, would have sailed straight through.
+   * PostgREST filters; so does this.
+   */
+  const scoped = (rows) => {
+    const eq = /session_id=eq\.([^&]*)/.exec(u.search);
+    if (eq) return rows.filter((r) => r.session_id === decodeURIComponent(eq[1]));
+    if (/session_id=is\.null/.test(u.search)) return rows.filter((r) => r.session_id == null);
+    return rows;
+  };
   if (req.method === 'GET') {
     res.writeHead(200, {'content-type':'application/json'});
-    return res.end(JSON.stringify([...t.values()]));
+    return res.end(JSON.stringify(scoped([...t.values()])));
   }
   if (req.method === 'DELETE') {
     const m = /id=in\.\(([^)]*)\)/.exec(u.search) ?? [];
-    for (const id of (m[1] ?? '').split(',')) t.delete(id);
+    const ids = new Set((m[1] ?? '').split(','));
+    for (const row of scoped([...t.values()])) if (ids.has(row.id)) t.delete(row.id);
     res.writeHead(204); return res.end();
   }
   let body = ''; for await (const c of req) body += c;
@@ -101,7 +117,31 @@ await send(B.p, { kind:'sync', cloud: CLOUD });
 await send(A.p, { kind:'sync', cloud: CLOUD });
 const afterA = (await send(A.p, { kind:'stats' })).data;
 console.log('after forget on B → A has', afterA.chunk_count, 'chunks (0 = correct, resurrection = bug)');
-const ok = afterA.chunk_count === 0 && found.hits.length > 0;
-console.log(`\n${ok ? 'PASS' : 'FAIL'} — memory crossed profiles and stayed deleted`);
+/*
+ * --- The containment test ---
+ *
+ * Everything above runs with no session, so it only proves the private path. The
+ * question that decides whether sessions are safe to ship is the opposite one:
+ * connected to a *shared* session, does a privately kept passage stay put?
+ *
+ * A keeps something with no session and syncs into session 'team-1'. Nothing of
+ * A's should reach that session's rows. This is the disclosure nobody would
+ * notice on their own machine, so it is asserted rather than assumed.
+ */
+await send(A.p, { kind:'ingest', text:'A private note about salary negotiation that must never be shared with the team session.', sourceUrl:'https://example.com/private', title:'Private note' });
+const pend2 = (await send(A.p, { kind:'listPending' })).data;
+await send(A.p, { kind:'approve', chunkIds: pend2.map(c=>c.chunk_id) });
+
+const before = tables.chunks.size;
+const shared = await send(A.p, { kind:'sync', cloud: { ...CLOUD, sessionId: 'team-1' } });
+const leaked = [...tables.chunks.values()].filter(r => r.session_id === 'team-1');
+console.log('private chunks locally:', (await send(A.p, { kind:'stats' })).data.chunk_count);
+console.log('rows pushed into team-1:', leaked.length, '(0 = correct, anything else is a disclosure)');
+console.log('shared sync reported:', JSON.stringify(shared.data));
+
+const contained = leaked.length === 0;
+
+const ok = afterA.chunk_count === 0 && found.hits.length > 0 && contained;
+console.log(`\n${ok ? 'PASS' : 'FAIL'} — memory crossed profiles, stayed deleted, and private stayed private`);
 await A.b.close(); await B.b.close(); server.close();
 process.exit(ok ? 0 : 1);

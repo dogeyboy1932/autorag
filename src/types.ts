@@ -28,6 +28,27 @@ export interface Conflict {
   };
 }
 
+export type SessionId = string;
+
+/**
+ * A named corpus that other people can be let into.
+ *
+ * Absent on a Source or Chunk — which is the default and stays the default — means
+ * the row is private to whoever kept it. Sharing is always an explicit act: you
+ * make a session and put things in it, rather than having a private corpus quietly
+ * become visible because it was adopted into one.
+ *
+ * Locally this is only a label. It decides what a sync *pushes*, not what search
+ * can find: your own memory stays one corpus to ask questions of, whether or not a
+ * given passage happens to be shared.
+ */
+export interface CorpusSession {
+  id: SessionId;
+  name: string;
+  /** Whether members of the session may read and write its rows. */
+  shared: boolean;
+}
+
 export interface Source {
   id: SourceId;
   url: string;
@@ -37,6 +58,8 @@ export interface Source {
   stale: boolean;
   staleReason?: string;
   tags: string[];
+  /** Absent = private to this person. See `CorpusSession`. */
+  sessionId?: SessionId;
 }
 
 export interface Chunk {
@@ -59,6 +82,8 @@ export interface Chunk {
    * passage compete with the passage in search. Travels with every hit.
    */
   note?: string;
+  /** Absent = private to this person. See `CorpusSession`. */
+  sessionId?: SessionId;
 }
 
 /** A scored retrieval hit, always carrying provenance. */

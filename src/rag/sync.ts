@@ -46,6 +46,17 @@ import {
 export interface CloudConfig {
   url: string;
   anonKey: string;
+  /**
+   * The shared session this connection mirrors. Absent means the private corpus —
+   * rows with no `session_id`, visible to nobody but their owner.
+   *
+   * This is the whole of what makes a sync safe to point at someone else's
+   * project: a run only ever pushes rows already tagged with this session, and
+   * only ever reads rows carrying it. A passage kept privately cannot be swept
+   * into a shared session by connecting to one, which is the mistake that would
+   * matter most and would be discovered by someone else reading your notes.
+   */
+  sessionId?: string;
 }
 
 export interface Session {
@@ -158,8 +169,9 @@ export async function refresh(c: CloudConfig, session: Session): Promise<Session
  * array. Converting here rather than at the call sites keeps exactly one place
  * where a vector can be mangled.
  */
-const rowOfChunk = (c: Chunk) => ({
+const rowOfChunk = (c: Chunk, sessionId?: string) => ({
   id: c.id,
+  session_id: sessionId ?? null,
   source_id: c.sourceId,
   text: c.text,
   ordinal: c.ordinal,
@@ -199,10 +211,12 @@ const chunkOfRow = (r: ChunkRow): Chunk => ({
   ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
   ...(r.rejection_reason ? { rejectionReason: r.rejection_reason } : {}),
   ...(r.note ? { note: r.note } : {}),
+  ...(r.session_id ? { sessionId: r.session_id } : {}),
 });
 
-const rowOfSource = (s: Source) => ({
+const rowOfSource = (s: Source, sessionId?: string) => ({
   id: s.id,
+  session_id: sessionId ?? null,
   url: s.url,
   title: s.title,
   ingested_at: s.ingestedAt,
@@ -221,6 +235,7 @@ const sourceOfRow = (r: SourceRow): Source => ({
   stale: r.stale,
   ...(r.stale_reason ? { staleReason: r.stale_reason } : {}),
   tags: r.tags ?? [],
+  ...(r.session_id ? { sessionId: r.session_id } : {}),
 });
 
 async function upsert(c: CloudConfig, s: Session, table: string, rows: unknown[]) {
@@ -237,8 +252,20 @@ async function upsert(c: CloudConfig, s: Session, table: string, rows: unknown[]
   }
 }
 
+/**
+ * Every read is scoped to the active session, and the private case is
+ * `session_id=is.null` rather than an unfiltered select.
+ *
+ * Leaving it unfiltered would work and would be wrong: RLS already hides other
+ * people's rows, so an unscoped read looks correct right up until the owner —
+ * who can legitimately see every session they host — syncs their private corpus
+ * and pulls every shared passage into it.
+ */
+const scope = (c: CloudConfig) =>
+  c.sessionId ? `session_id=eq.${encodeURIComponent(c.sessionId)}` : 'session_id=is.null';
+
 async function selectAll<T>(c: CloudConfig, s: Session, table: string): Promise<T[]> {
-  const res = await fetch(rest(c, `${table}?select=*`), { headers: headers(c, s) });
+  const res = await fetch(rest(c, `${table}?select=*&${scope(c)}`), { headers: headers(c, s) });
   if (!res.ok) await fail(res);
   return (await res.json()) as T[];
 }
@@ -270,11 +297,29 @@ export async function syncNow(
   s: Session,
   onProgress?: (message: string) => void,
 ): Promise<SyncResult> {
-  const [sources, chunks, deletions] = await Promise.all([
+  const [allLocalSources, allLocalChunks, allLocalDeletions] = await Promise.all([
     allSources(),
     allChunks(),
     allDeletions(),
   ]);
+
+  /*
+   * A sync touches exactly one session, and everything below works from these
+   * three filtered lists rather than the full corpus.
+   *
+   * This is the line that keeps a private passage private. Push the whole corpus
+   * while connected to a shared session and every note you ever kept becomes
+   * readable by everyone in it — a disclosure you would not discover yourself,
+   * because on your machine nothing looks any different.
+   *
+   * `?? null` on both sides so that "no session" compares equal to "no session"
+   * rather than `undefined !== null` quietly filtering everything out and
+   * reporting a successful sync of nothing.
+   */
+  const inScope = (x: { sessionId?: string }) => (x.sessionId ?? null) === (c.sessionId ?? null);
+  const sources = allLocalSources.filter(inScope);
+  const chunks = allLocalChunks.filter(inScope);
+  const deletions = allLocalDeletions.filter(inScope);
 
   /*
    * Deletions go up first, and this ordering is load-bearing. Push rows before
@@ -287,13 +332,13 @@ export async function syncNow(
       c,
       s,
       'deletions',
-      deletions.map((d) => ({ id: d.id, kind: d.kind, at: d.at })),
+      deletions.map((d) => ({ id: d.id, kind: d.kind, at: d.at, session_id: c.sessionId ?? null })),
     );
     for (const kind of ['source', 'chunk'] as const) {
       const ids = deletions.filter((d) => d.kind === kind).map((d) => d.id);
       if (!ids.length) continue;
       const table = kind === 'source' ? 'sources' : 'chunks';
-      const res = await fetch(rest(c, `${table}?id=in.(${ids.join(',')})`), {
+      const res = await fetch(rest(c, `${table}?id=in.(${ids.join(',')})&${scope(c)}`), {
         method: 'DELETE',
         headers: headers(c, s),
       });
@@ -302,8 +347,8 @@ export async function syncNow(
   }
 
   onProgress?.(`Uploading ${sources.length} source(s), ${chunks.length} passage(s)`);
-  await upsert(c, s, 'sources', sources.map(rowOfSource));
-  await upsert(c, s, 'chunks', chunks.map(rowOfChunk));
+  await upsert(c, s, 'sources', sources.map((x) => rowOfSource(x, c.sessionId)));
+  await upsert(c, s, 'chunks', chunks.map((x) => rowOfChunk(x, c.sessionId)));
 
   onProgress?.('Downloading what other devices kept');
   const [remoteSources, remoteChunks, remoteDeletions] = await Promise.all([
@@ -333,7 +378,7 @@ export async function syncNow(
   const known = new Set(deletions.map((d) => d.id));
   for (const d of remoteDeletions) {
     if (known.has(d.id)) continue;
-    await applyRemoteDeletion(d.id, d.kind, d.at);
+    await applyRemoteDeletion(d.id, d.kind, d.at, c.sessionId);
     deleted++;
   }
 

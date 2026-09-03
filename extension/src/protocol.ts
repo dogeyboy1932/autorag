@@ -79,6 +79,17 @@ export interface CloudSettings {
   accessToken?: string;
   refreshToken?: string;
   email?: string;
+  /**
+   * The shared session being mirrored; absent means the private corpus.
+   *
+   * Everything between here and `syncNow` must carry this field. It was dropped
+   * twice on the way — once by a destructure in the `sync` handler and once by a
+   * hand-built config in `syncWithRenewal` — and the symptom was a sync that
+   * reported pushing rows into a session while pushing none, because the engine
+   * quietly fell back to the private scope. Explicit field lists are what made
+   * that possible; if you add a field here, follow it to the call sites.
+   */
+  sessionId?: string;
 }
 
 /** Where the answering model lives and what it costs. Stored in chrome.storage.local. */

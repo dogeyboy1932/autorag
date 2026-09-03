@@ -38,7 +38,13 @@ interface AutoragDB extends DBSchema {
    */
   deletions: {
     key: string;
-    value: { id: string; kind: 'source' | 'chunk'; at: string };
+    /*
+     * `sessionId` is on the tombstone for the same reason it is on the row: a
+     * sync only ever touches one session, so a deletion that does not say which
+     * session it belonged to would be pushed into whichever one happened to be
+     * active — deleting a shared passage because someone forgot a private one.
+     */
+    value: { id: string; kind: 'source' | 'chunk'; at: string; sessionId?: string };
   };
 }
 
@@ -113,28 +119,39 @@ export async function deleteSourceCascade(id: SourceId): Promise<number> {
   const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
   const chunkIds = await tx.objectStore('chunks').index('by-source').getAllKeys(id);
   const at = new Date().toISOString();
+  // Read the session off the row before it goes: after the delete there is
+  // nothing left to ask, and a tombstone with no session syncs into the wrong one.
+  const session = (await tx.objectStore('sources').get(id))?.sessionId;
+  const stamp = session ? { sessionId: session } : {};
   for (const chunkId of chunkIds) {
     await tx.objectStore('chunks').delete(chunkId);
-    await tx.objectStore('deletions').put({ id: chunkId, kind: 'chunk', at });
+    await tx.objectStore('deletions').put({ id: chunkId, kind: 'chunk', at, ...stamp });
   }
   await tx.objectStore('sources').delete(id);
-  await tx.objectStore('deletions').put({ id, kind: 'source', at });
+  await tx.objectStore('deletions').put({ id, kind: 'source', at, ...stamp });
   await tx.done;
   emitCorpusChange();
   return chunkIds.length;
 }
 
 /** Every deletion this device knows about, for the sync layer to propagate. */
-export async function allDeletions(): Promise<{ id: string; kind: 'source' | 'chunk'; at: string }[]> {
+export async function allDeletions(): Promise<
+  { id: string; kind: 'source' | 'chunk'; at: string; sessionId?: string }[]
+> {
   return (await db()).getAll('deletions');
 }
 
 /** Records a deletion observed from another device, and applies it here. */
-export async function applyRemoteDeletion(id: string, kind: 'source' | 'chunk', at: string) {
+export async function applyRemoteDeletion(
+  id: string,
+  kind: 'source' | 'chunk',
+  at: string,
+  sessionId?: string,
+) {
   const database = await db();
   const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
   await tx.objectStore(kind === 'source' ? 'sources' : 'chunks').delete(id);
-  await tx.objectStore('deletions').put({ id, kind, at });
+  await tx.objectStore('deletions').put({ id, kind, at, ...(sessionId ? { sessionId } : {}) });
   await tx.done;
 }
 
@@ -308,11 +325,18 @@ export async function wipeAll(): Promise<void> {
    * would be undone by the next pull — the most alarming possible bug, since the
    * one thing a person doing this wants is for it to be gone everywhere.
    */
-  for (const id of await tx.objectStore('sources').getAllKeys()) {
-    await tx.objectStore('deletions').put({ id, kind: 'source', at });
+  // Each tombstone carries the session its row was in. A sync only touches one
+  // session, so tombstones with no session would propagate the wipe to the
+  // private corpus alone and leave every shared passage standing.
+  for (const row of await tx.objectStore('sources').getAll()) {
+    await tx
+      .objectStore('deletions')
+      .put({ id: row.id, kind: 'source', at, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
   }
-  for (const id of await tx.objectStore('chunks').getAllKeys()) {
-    await tx.objectStore('deletions').put({ id, kind: 'chunk', at });
+  for (const row of await tx.objectStore('chunks').getAll()) {
+    await tx
+      .objectStore('deletions')
+      .put({ id: row.id, kind: 'chunk', at, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
   }
   await tx.objectStore('sources').clear();
   await tx.objectStore('chunks').clear();

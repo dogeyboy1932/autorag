@@ -28,7 +28,7 @@ import {
 } from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
-import { isEnvelope, type Event, type Request, type Response } from '../protocol';
+import { isEnvelope, type CloudSettings, type Event, type Request, type Response } from '../protocol';
 import { askModel, standaloneQuery } from './answer';
 import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
 import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
@@ -142,11 +142,11 @@ async function handle(request: Request): Promise<unknown> {
      * download reports a percentage.
      */
     case 'sync': {
-      const { url, anonKey, accessToken, refreshToken, email } = request.cloud;
+      const { url, anonKey, accessToken, refreshToken, email, sessionId } = request.cloud;
       if (!accessToken || !refreshToken) throw new Error('Not signed in to the cloud memory.');
-      record('working', 'Syncing memory');
+      record('working', sessionId ? `Syncing session ${sessionId}` : 'Syncing memory');
       const result = await syncWithRenewal(
-        { url, anonKey, accessToken, refreshToken, email },
+        { url, anonKey, accessToken, refreshToken, email, sessionId },
         (message) => record('working', message),
       );
       record(
@@ -512,9 +512,14 @@ let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncing = false;
 
 async function cloudSettings() {
-  const v = (await chrome.storage.local.get('cloud')) as {
-    cloud?: { url: string; anonKey: string; accessToken?: string; refreshToken?: string; email?: string };
-  };
+  /*
+   * Typed as `CloudSettings` rather than re-describing the shape inline. There
+   * were four hand-written copies of it, and adding `sessionId` to the protocol
+   * silently failed to reach any of them — the sync ran in the private scope
+   * while reporting that it had pushed rows to a shared session. One name means
+   * a new field is a compile error at every call site instead of a no-op.
+   */
+  const v = (await chrome.storage.local.get('cloud')) as { cloud?: CloudSettings };
   const c = v.cloud;
   if (!c?.url || !c.anonKey || !c.accessToken || !c.refreshToken) return null;
   return c;
@@ -535,7 +540,7 @@ async function syncWithRenewal(
   c: NonNullable<Awaited<ReturnType<typeof cloudSettings>>>,
   onProgress?: (m: string) => void,
 ) {
-  const cfg = { url: c.url, anonKey: c.anonKey };
+  const cfg = { url: c.url, anonKey: c.anonKey, ...(c.sessionId ? { sessionId: c.sessionId } : {}) };
   const session = { accessToken: c.accessToken!, refreshToken: c.refreshToken!, email: c.email ?? '' };
   try {
     return await syncNow(cfg, session, onProgress);
