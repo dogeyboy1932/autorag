@@ -67,6 +67,22 @@ if (!U || !PK || !SK) {
   const got = (k) => mod.match(new RegExp(`${k}: '([^']*)'`))?.[1] ?? '';
   const modUrl = got('url');
   const modKey = got('publishableKey');
+
+  /*
+   * Only quoted values count, not mentions.
+   *
+   * The first version grepped the whole file for the prefix and failed on the doc
+   * comment that warns against pasting one; the second still matched it, because
+   * that comment writes the prefix in markdown backticks. Requiring real key
+   * characters after the prefix distinguishes a pasted credential from the
+   * sentence telling you not to paste one. A check that rejects a correct file
+   * teaches people to ignore it, which is worse than the hole it guards.
+   */
+  if (/['"`]sb_secret_[A-Za-z0-9_-]{8,}/.test(mod)) {
+    console.error('FAIL  src/rag/directory.ts assigns a secret key. It bypasses RLS; remove it.');
+    process.exit(1);
+  }
+
   if (modUrl.includes('REPLACE_ME') || modKey.includes('REPLACE_ME')) {
     console.error(
       'FAIL  src/rag/directory.ts still has its placeholder. Paste the directory\n' +
@@ -79,10 +95,6 @@ if (!U || !PK || !SK) {
       'FAIL  src/rag/directory.ts does not match .env2 — the extension would talk to a\n' +
         '      different project than this check just verified.',
     );
-    process.exit(1);
-  }
-  if (/sb_secret_/.test(mod)) {
-    console.error('FAIL  src/rag/directory.ts contains a secret key. It bypasses RLS; remove it.');
     process.exit(1);
   }
   // Not a counted assertion — a precondition. Printing PASS here would make the

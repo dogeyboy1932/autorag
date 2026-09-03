@@ -33,13 +33,13 @@
 import type { CloudConfig, Session } from './sync';
 
 export const DIRECTORY = {
-  url: 'https://REPLACE_ME.supabase.co',
+  url: 'https://qkupjhuroorzijbfqdtv.supabase.co',
   /*
    * Paste the directory project's `sb_publishable_…` key here — never the
    * `sb_secret_…` one. `pnpm dir:check` fails loudly while this is a placeholder,
    * so an unconfigured build cannot quietly ship.
    */
-  publishableKey: 'REPLACE_ME',
+  publishableKey: 'sb_publishable_l8Ko0A6PTI3AT2cWl2rMlA_5Bx2XBY4',
 } as const;
 
 export const directoryConfigured = () =>
