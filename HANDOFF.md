@@ -4,9 +4,9 @@
 you read, you decide what stays, and it answers questions from what survived — citing the
 page each claim came from.
 
-**Branch:** `main`. **Nothing pushed.** Everything below the last commit is **uncommitted
-in the working tree** — that is the first thing to deal with.
-**Last worked:** 2026-09-03 (hackathon day; submitted with an extension).
+**Branch:** `main`, clean, pushed to <https://github.com/dogeyboy1932/autorag> (public, MIT
+detected in the About panel). **Last worked:** 2026-09-03 (hackathon day; submitted with an
+extension).
 
 ```bash
 pnpm install && pnpm ext
@@ -50,10 +50,28 @@ way `probes/extension-check.mjs` does.
 | `pnpm ext:check` | **48/48** against real Brave, throwaway profile |
 | `pnpm ext:sync` | passes — corpus crosses two browser profiles, deletions stick |
 | `pnpm bench` | 21/21 top-1 · 3/3 no-overclaim · 25/25 no-withhold (needs `pnpm dev` running) |
+| `pnpm build` | static export clean; `out/` carries the extension zip and the meta tag |
+| the web app | driven by hand at last — **0 console errors**, 5 tools on `document.modelContext` |
 | HUMAN-TASKS | reported passing by hand for the **pre-session** build. **Rewrite it after Step 5 — see Step 6.** |
 
-**Uncommitted work is the whole of today.** ~26 changed/new files. Commit before anything
-else, or the next session inherits a tree it cannot reason about.
+**Steps 1, 2a, 2b and 2c are done and pushed.** The working tree is clean. Step 2d — the
+Netlify site — is the only thing left before Step 3, and it is waiting on the author to
+connect the repo in the Netlify UI and hand back the origin.
+
+Two things were confirmed by driving the built `out/` in a real browser, both of which the
+previous session had flagged as unverified:
+
+- **The tool-name collision is genuinely fixed.** With the extension loaded on the web app's
+  own page, the surface still holds exactly 5 `autorag_*` tools, no duplicates, and no
+  `Tool already registered` anywhere in the console.
+- **The web app is clean on load.** Zero console errors, zero page errors, zero failed
+  requests. It was never once opened by hand before today.
+
+One piece of console noise that is **not** a bug and should not be chased: on an `http://`
+origin the content script injects the local relay's embed, which opens a WebSocket to
+`ws://127.0.0.1:9333` and logs a failure when no `pnpm bridge` is running. It is skipped
+entirely on `https://` (D16), so it cannot appear on the deployed site — only on
+`localhost` during development.
 
 ---
 
@@ -219,34 +237,56 @@ using WebMCP"*, and putting a WebMCP surface on every page a person visits is ex
 - **A web page cannot install an extension on click** — inline install was removed in Chrome
   71. It is a zip download plus three lines of instructions.
 
-### Step 1 — Finish committing (~15 min)
+### Step 1 — Finish committing — **DONE**
 
-Four commits, one feature each. Message style: what changed and *why*, in prose.
+Five commits rather than the four planned. The plan grouped `probes/extension-check.mjs`
+with the stand-down change, but that file's 726 new lines test Ask, the PDF reader and
+edit/discard and have nothing to do with standing down, so it got its own commit.
 
-1. `src/rag/sync.ts` + `probes/sync-check.mjs` + `src/rag/store.ts` — **cloud sync and tombstones**
-2. `extension/src/sidepanel/*` — **three tabs, chat, sources drawer, persisted thread**
-3. `app/layout.tsx` + `extension/src/content/webmcp.ts` + `src/webmcp/registry.ts` +
-   `probes/extension-check.mjs` — **the extension stands down on the web app's own page**
-4. `HANDOFF.md` `HUMAN-TASKS.md` `amendments.md` `lib/webmcp/API-DELTA.md` — **docs**
+### Step 2 — Make the submission valid
 
-### Step 2 — Make the submission valid (~1h)
+**a. Public repo — DONE.** <https://github.com/dogeyboy1932/autorag>, public, MIT showing in
+the About panel. History was scanned for secrets before it went up; only
+`.env.local.example` was ever committed and it holds no keys.
 
-**a. Public repo.** `gh repo create autorag --public --source=. --push`. Confirm GitHub shows
-MIT in the About panel — the requirement calls that out specifically.
+**b. The literal API call — DONE.** Both call sites now say
+`document.modelContext.registerTool(...)` by name: `src/webmcp/registry.ts` for the web app
+and `extension/src/content/webmcp.ts` for the every-page surface. The `navigator` arm stays
+as the fallback it always was (D1).
 
-**b. The literal API call.** The requirement quotes
-`document.modelContext.registerTool({ name, description, inputSchema, execute })`, and that
-exact string appears nowhere: both call sites resolve the context first (`ctx.registerTool`)
-to support the `navigator` polyfill. In `src/webmcp/registry.ts`, add the direct
-`document.modelContext.registerTool(...)` call on the document path — genuinely executed, and
-greppable.
+Two things worth knowing before touching it again. The whole tool object goes up, **not** the
+four fields the spec's example shows — these tools carry `title` and `annotations` and
+destructuring `{ name, description, inputSchema, execute }` to match an example would quietly
+drop them. And `types/webmcp-dom.d.ts` now declares `modelContext` on `Document` and
+`Navigator`, because lib.dom has no such property and every reference used to be an
+`as unknown as` cast — which would have left the one call that matters unchecked.
 
-**c. Zip the extension.** New `pnpm ext:zip` → `public/autorag-extension.zip` from
-`extension/dist`. `output: 'export'` copies `public/` into `out/`, so Netlify serves it at
-`/autorag-extension.zip`.
+**c. Zip the extension — DONE.** `pnpm ext:zip` → `public/autorag-extension.zip`. 225 files,
+80.0MB → 20.7MB.
 
-**d. Deploy to Netlify.** Build `pnpm build`, publish `out`, Node 20+. Static — no adapter.
-**Claim the site name first**; Step 4 needs the real origin in the manifest.
+It is **gitignored and built during the deploy**, not committed: a 20MB binary in git would
+be re-committed on every extension change and would ship stale the first time someone forgot.
+`netlify.toml` runs `pnpm ext && pnpm ext:zip && pnpm build`, and that order is load-bearing —
+the zip must exist in `public/` before the export copies `public/` into `out/`.
+
+`extension/zip.mjs` writes the archive itself rather than shelling out to `zip` (a binary the
+build image might not have) or pulling in an archiver for one file. It was verified rather
+than assumed, because a hand-written archive is exactly the thing that can be malformed and
+still look right: `unzip -t` reports no errors and `diff -r` of the extracted tree against
+`extension/dist` is empty — so the download is byte-for-byte the build `ext:check` ran on.
+
+**d. Deploy to Netlify — the one thing outstanding.** `netlify.toml` is committed and carries
+the build command, publish dir (`out`) and `NODE_VERSION = "22"` (pinned because `zip.mjs`
+uses `zlib.crc32`, which landed in 20.15). Connect the repo at netlify.com and the settings
+are picked up with nothing to type.
+
+**Do not add COOP/COEP headers** as a routine hardening pass. They would buy SharedArrayBuffer
+and threaded WASM and would also block the cross-origin Hugging Face fetch that downloads the
+embedding model, because that CDN sends no CORP. The app would come up looking perfectly
+correct and simply never finish loading its model. `netlify.toml` says so in place.
+
+**Claim the site name first**; Step 4 needs the real origin in the manifest's
+`externally_connectable`, and the zip has to be rebuilt after it is set.
 
 ---
 
@@ -466,8 +506,12 @@ about paths nobody has walked.
 
 ```bash
 pnpm typecheck && pnpm ext && pnpm ext:check   # 48/48
-pnpm ext:sync && pnpm build                     # sync green, app exports cleanly
+pnpm ext:sync                                   # two profiles, deletions stick
+pnpm ext:zip && pnpm build                      # zip packs, app exports cleanly
 ```
+
+`ext:zip` before `build`, always — `build` copies `public/` into `out/`, so running it first
+publishes a site whose download link 404s.
 
 As a judge: open the Netlify URL in Chrome with WebMCP enabled → click **Demo mode** → search,
 ask, paste a passage, approve it → download the zip, load unpacked, reload the app → it now
@@ -494,10 +538,13 @@ extension/
   src/sidepanel/  three tabs; the chat lives in Recall
   src/reader/     renders PDFs with pdf.js so a highlight is real DOM (D19)
   src/background.ts  menus, shortcuts, tab routing
+  build.mjs · zip.mjs   esbuild bundler · the deploy's extension zip
 
 src/rag/          THE ENGINE — embed · chunk · store · search · screen · sync
-src/webmcp/       the web app's 15-tool surface
+src/webmcp/       the web app's tool surface (5 registered at load; the rest by state)
 app/ components/  the web app
+types/            JSX typings for the declarative attrs · document.modelContext
+netlify.toml      build command, publish dir, and why COOP/COEP stay off
 
 probes/           extension-check (48) · sync-check · webmcp-loop · relay-check
 bench/            retrieval benchmark          evals/  11 QA pairs
