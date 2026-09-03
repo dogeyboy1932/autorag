@@ -12,6 +12,7 @@
     "loop": "node probes/webmcp-loop.mjs",
     "ext": "node extension/build.mjs",
     "ext:watch": "node extension/build.mjs --watch",
+    "ext:zip": "node extension/zip.mjs",
     "ext:check": "node probes/extension-check.mjs",
     "ext:sync": "node probes/sync-check.mjs",
     "bridge": "node extension/connector/serve.mjs",

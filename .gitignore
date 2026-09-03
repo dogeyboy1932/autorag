@@ -9,3 +9,8 @@ next-env.d.ts
 .DS_Store
 out/
 extension/dist/
+
+# Built by `pnpm ext:zip` during the deploy, from the dist the checks ran
+# against. Committing a 20MB binary would mean re-committing it on every
+# extension change, and shipping a stale one the first time someone forgot.
+public/autorag-extension.zip
