@@ -24,8 +24,17 @@
 --
 -- ## Before this works
 --
--- Enable **anonymous sign-in** in Authentication → Sign In / Providers. It is off
--- by default and demo mode cannot work without it.
+-- Enable **anonymous sign-ins** under Authentication → Sign In / Providers. It is
+-- its own toggle, further down the page and separate from the Email provider —
+-- which is easy to enable by mistake instead, since that is the block that
+-- catches the eye. Verify rather than assume:
+--
+--   curl -s -X POST "$SUPABASE_URL/auth/v1/signup" \
+--        -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+--        -H 'content-type: application/json' -d '{}'
+--
+-- An `access_token` back means it is on. `{"msg":"Anonymous sign-ins are
+-- disabled"}` means it is not, whatever the dashboard appeared to say.
 
 -- ---------------------------------------------------------------- tables ----
 
@@ -90,14 +99,55 @@ drop policy if exists own_profile on profiles;
 create policy own_profile on profiles for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 
+-- ## Why these two questions are functions and not subqueries
+--
+-- The obvious way to write the two policies below is with an `exists (select …)`
+-- against the other table. It deadlocks the planner, and the first version here
+-- did exactly that:
+--
+--   SELECT on sessions -> visible_sessions reads invites
+--                      -> owner_manages_invites reads sessions
+--                      -> visible_sessions reads invites -> …
+--
+--   ERROR 42P17: infinite recursion detected in policy for relation "sessions"
+--
+-- and it is a *hard* failure, not a slow one — every read of either table 500s.
+--
+-- A `security definer` function runs as its owner, and a table's owner is not
+-- subject to that table's RLS, so the read inside it evaluates no policy and the
+-- cycle has nowhere to close. Each function answers exactly one question about
+-- **the caller** — never about a third party — so running it with more privilege
+-- than the caller has does not leak anything the caller could not already ask.
+
+create or replace function owns_session(p_code text)
+returns boolean language sql security definer stable
+set search_path = public, pg_temp as $$
+  select exists (
+    select 1 from sessions s
+    where s.code = p_code and s.owner_user_id = auth.uid()
+  );
+$$;
+
+create or replace function invited_to_session(p_code text)
+returns boolean language sql security definer stable
+set search_path = public, pg_temp as $$
+  select exists (
+    select 1 from invites i
+    where i.session_code = p_code and i.email = auth.jwt() ->> 'email'
+  );
+$$;
+
+-- Parameters are `p_code` rather than `code` deliberately: a parameter named for
+-- the column it is compared against silently shadows that column, and
+-- `where s.code = code` is then a tautology that makes the policy match every
+-- row. It fails open, which is the worst way for an access check to be wrong.
+
 -- You can see a session if you own it, were invited by email, or it is open.
 drop policy if exists visible_sessions on sessions;
 create policy visible_sessions on sessions for select using (
   owner_user_id = auth.uid()
   or open_join
-  or exists (select 1 from invites i
-             where i.session_code = sessions.code
-               and i.email = auth.jwt() ->> 'email')
+  or invited_to_session(code)
 );
 
 drop policy if exists manage_own_sessions on sessions;
@@ -105,10 +155,17 @@ create policy manage_own_sessions on sessions for all
   using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
 
 drop policy if exists owner_manages_invites on invites;
-create policy owner_manages_invites on invites for all using (
-  exists (select 1 from sessions s
-          where s.code = invites.session_code and s.owner_user_id = auth.uid())
-);
+create policy owner_manages_invites on invites for all
+  using (owns_session(session_code)) with check (owns_session(session_code));
+
+-- The invitee has to be able to read the invite that names them, and the policy
+-- above does not give them that — it grants only to the session's owner. Without
+-- this, `visible_sessions` would consult a row the invited person cannot see, and
+-- an invitation would be issued to someone who could never find it. Two
+-- permissive SELECT policies OR together, which is what we want here.
+drop policy if exists own_invites_visible on invites;
+create policy own_invites_visible on invites for select
+  using (email = auth.jwt() ->> 'email');
 
 -- ------------------------------------------------------------- lookup ------
 
