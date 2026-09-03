@@ -12,9 +12,10 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { Chunk, ChunkId, Conflict, Source, SourceId } from '@/src/types';
 import { emitCorpusChange } from './bus';
+import { PERSONAL } from './sessions';
 
 const DB_NAME = 'autorag';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 interface AutoragDB extends DBSchema {
   sources: {
@@ -53,7 +54,7 @@ let dbPromise: Promise<IDBPDatabase<AutoragDB>> | null = null;
 function db(): Promise<IDBPDatabase<AutoragDB>> {
   if (!dbPromise) {
     dbPromise = openDB<AutoragDB>(DB_NAME, DB_VERSION, {
-      upgrade(database, from) {
+      upgrade(database, from, _to, tx) {
         if (from < 1) {
           const sources = database.createObjectStore('sources', { keyPath: 'id' });
           sources.createIndex('by-url', 'url');
@@ -65,6 +66,27 @@ function db(): Promise<IDBPDatabase<AutoragDB>> {
         // Added with cloud sync. Guarded by version rather than recreated, so an
         // existing corpus survives the upgrade instead of being rebuilt empty.
         if (from < 2) database.createObjectStore('deletions', { keyPath: 'id' });
+        /*
+         * v3: every row belongs to a session, so rows kept before sessions existed
+         * join the personal one.
+         *
+         * Done here rather than lazily on read because the alternative is a corpus
+         * where some rows answer the question and some do not, for as long as
+         * nobody happens to touch them — and a sync scopes by session, so an
+         * unmigrated row is simply invisible to every sync that runs. Migrating on
+         * open means there is one moment where it is true, not a slow drift.
+         */
+        if (from > 0 && from < 3) {
+          for (const name of ['sources', 'chunks', 'deletions'] as const) {
+            const store = tx.objectStore(name);
+            void store.openCursor().then(function stamp(cursor): unknown {
+              if (!cursor) return undefined;
+              const row = cursor.value as { sessionId?: string };
+              if (!row.sessionId) cursor.update({ ...row, sessionId: PERSONAL } as never);
+              return cursor.continue().then(stamp);
+            });
+          }
+        }
       },
     });
   }

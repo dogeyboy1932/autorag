@@ -30,6 +30,20 @@ let i = 0;
 while (i < lines.length && (lines[i].startsWith('--') || !lines[i].trim())) i++;
 const body = lines.slice(i).join('\n').trim();
 
+/*
+ * A backtick in the .sql file terminates the template literal it is embedded in,
+ * and the result is a TypeScript syntax error hundreds of lines from the edit
+ * that caused it. Twice now a markdown habit in a SQL comment has done exactly
+ * that, so it is checked here rather than remembered.
+ */
+if (body.includes('`') || body.includes('${')) {
+  console.error(
+    'FAIL  supabase/corpus.sql contains a backtick or ${ — it is embedded in a TypeScript\n' +
+      '      template literal, so either one breaks the build. Use plain words in SQL comments.',
+  );
+  process.exit(1);
+}
+
 const match = ts.match(/export const SCHEMA_SQL = `([\s\S]*?)`;/);
 if (!match) {
   console.error('FAIL  SCHEMA_SQL not found in src/rag/sync.ts');

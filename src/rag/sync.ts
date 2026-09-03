@@ -42,6 +42,7 @@ import {
   putChunks,
   upsertSource,
 } from './store';
+import { sessionOf } from './sessions';
 
 export interface CloudConfig {
   url: string;
@@ -171,7 +172,7 @@ export async function refresh(c: CloudConfig, session: Session): Promise<Session
  */
 const rowOfChunk = (c: Chunk, sessionId?: string) => ({
   id: c.id,
-  session_id: sessionId ?? null,
+  session_id: sessionOf(sessionId),
   source_id: c.sourceId,
   text: c.text,
   ordinal: c.ordinal,
@@ -216,7 +217,7 @@ const chunkOfRow = (r: ChunkRow): Chunk => ({
 
 const rowOfSource = (s: Source, sessionId?: string) => ({
   id: s.id,
-  session_id: sessionId ?? null,
+  session_id: sessionOf(sessionId),
   url: s.url,
   title: s.title,
   ingested_at: s.ingestedAt,
@@ -253,16 +254,14 @@ async function upsert(c: CloudConfig, s: Session, table: string, rows: unknown[]
 }
 
 /**
- * Every read is scoped to the active session, and the private case is
- * `session_id=is.null` rather than an unfiltered select.
+ * Every read is scoped to the active session — one form, no null case.
  *
  * Leaving it unfiltered would work and would be wrong: RLS already hides other
  * people's rows, so an unscoped read looks correct right up until the owner —
- * who can legitimately see every session they host — syncs their private corpus
- * and pulls every shared passage into it.
+ * who can legitimately see every session they host — syncs one and pulls every
+ * other session's passages into it.
  */
-const scope = (c: CloudConfig) =>
-  c.sessionId ? `session_id=eq.${encodeURIComponent(c.sessionId)}` : 'session_id=is.null';
+const scope = (c: CloudConfig) => `session_id=eq.${encodeURIComponent(sessionOf(c.sessionId))}`;
 
 async function selectAll<T>(c: CloudConfig, s: Session, table: string): Promise<T[]> {
   const res = await fetch(rest(c, `${table}?select=*&${scope(c)}`), { headers: headers(c, s) });
@@ -316,7 +315,7 @@ export async function syncNow(
    * rather than `undefined !== null` quietly filtering everything out and
    * reporting a successful sync of nothing.
    */
-  const inScope = (x: { sessionId?: string }) => (x.sessionId ?? null) === (c.sessionId ?? null);
+  const inScope = (x: { sessionId?: string }) => sessionOf(x.sessionId) === sessionOf(c.sessionId);
   const sources = allLocalSources.filter(inScope);
   const chunks = allLocalChunks.filter(inScope);
   const deletions = allLocalDeletions.filter(inScope);
@@ -332,7 +331,7 @@ export async function syncNow(
       c,
       s,
       'deletions',
-      deletions.map((d) => ({ id: d.id, kind: d.kind, at: d.at, session_id: c.sessionId ?? null })),
+      deletions.map((d) => ({ id: d.id, kind: d.kind, at: d.at, session_id: sessionOf(c.sessionId) })),
     );
     for (const kind of ['source', 'chunk'] as const) {
       const ids = deletions.filter((d) => d.kind === kind).map((d) => d.id);
@@ -378,7 +377,7 @@ export async function syncNow(
   const known = new Set(deletions.map((d) => d.id));
   for (const d of remoteDeletions) {
     if (known.has(d.id)) continue;
-    await applyRemoteDeletion(d.id, d.kind, d.at, c.sessionId);
+    await applyRemoteDeletion(d.id, d.kind, d.at, sessionOf(c.sessionId));
     deleted++;
   }
 
@@ -444,6 +443,26 @@ alter table sources   add column if not exists session_id text;
 alter table chunks    add column if not exists session_id text;
 alter table deletions add column if not exists session_id text;
 
+-- Solo use is a session of one, so there is no such thing as a row without a
+-- session and no null case for a policy or a filter to forget. Rows kept before
+-- sessions existed join the personal one here; the default and the not-null then
+-- make it impossible to add another.
+insert into sessions (id, name, shared)
+  values ('personal', 'Personal', false)
+  on conflict (id) do nothing;
+
+update sources   set session_id = 'personal' where session_id is null;
+update chunks    set session_id = 'personal' where session_id is null;
+update deletions set session_id = 'personal' where session_id is null;
+
+alter table sources   alter column session_id set default 'personal';
+alter table chunks    alter column session_id set default 'personal';
+alter table deletions alter column session_id set default 'personal';
+
+alter table sources   alter column session_id set not null;
+alter table chunks    alter column session_id set not null;
+alter table deletions alter column session_id set not null;
+
 -- ## Why user_id stops being NOT NULL
 --
 -- A member of a shared session reaches this project as the **anon** role, holding
@@ -460,21 +479,14 @@ alter table sources   alter column user_id drop not null;
 alter table chunks    alter column user_id drop not null;
 alter table deletions alter column user_id drop not null;
 
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'sources_reachable') then
-    alter table sources add constraint sources_reachable
-      check (user_id is not null or session_id is not null);
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'chunks_reachable') then
-    alter table chunks add constraint chunks_reachable
-      check (user_id is not null or session_id is not null);
-  end if;
-  if not exists (select 1 from pg_constraint where conname = 'deletions_reachable') then
-    alter table deletions add constraint deletions_reachable
-      check (user_id is not null or session_id is not null);
-  end if;
-end $$;
+-- An earlier version added *_reachable check constraints here, guarding against a
+-- row with neither owner nor session. session_id not null above makes that
+-- unreachable by construction, so the checks became tautologies. Dropped rather
+-- than left in place: a constraint that cannot fail reads like protection and
+-- provides none.
+alter table sources   drop constraint if exists sources_reachable;
+alter table chunks    drop constraint if exists chunks_reachable;
+alter table deletions drop constraint if exists deletions_reachable;
 
 -- ------------------------------------------------------------------ RLS ----
 

@@ -18,6 +18,7 @@ import {
   putChunks,
   upsertSource,
 } from './store';
+import { sessionOf } from './sessions';
 
 export interface IngestInput {
   text: string;
@@ -25,6 +26,8 @@ export interface IngestInput {
   title: string;
   tags?: string[];
   publishedAt?: string;
+  /** Which session this is kept into. Absent means the personal one. */
+  sessionId?: string;
 }
 
 export interface IngestResult {
@@ -87,6 +90,7 @@ export async function ingestPassage(input: IngestInput): Promise<IngestResult> {
   // Re-ingesting the same URL extends the existing source rather than forking it,
   // so provenance stays one-to-one with the page it came from.
   const existing = await findSourceByUrl(input.sourceUrl);
+  const session = sessionOf(input.sessionId);
   const source: Source = existing ?? {
     id: newId('src'),
     url: input.sourceUrl,
@@ -94,6 +98,7 @@ export async function ingestPassage(input: IngestInput): Promise<IngestResult> {
     ingestedAt: now,
     stale: false,
     tags: input.tags ?? [],
+    sessionId: session,
   };
   if (existing && input.tags?.length) {
     source.tags = [...new Set([...source.tags, ...input.tags])];
@@ -120,6 +125,13 @@ export async function ingestPassage(input: IngestInput): Promise<IngestResult> {
       status: 'pending',
       conflicts,
       ingestedAt: now,
+      /*
+       * The chunk follows its source, not the active session. Re-ingesting a URL
+       * extends the existing source, so a passage added later would otherwise land
+       * in whatever session happened to be open and be split from the rest of the
+       * page it came from — with half of it shared and half of it not.
+       */
+      sessionId: source.sessionId ?? session,
     };
   });
 
