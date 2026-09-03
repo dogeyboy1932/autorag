@@ -54,6 +54,42 @@ if (!U || !PK || !SK) {
   process.exit(1);
 }
 
+/*
+ * The committed copy has to be the project this check just exercised.
+ *
+ * src/rag/directory.ts carries the directory's URL and publishable key so the
+ * extension can reach it, and .env2 carries the same pair for tooling. If they
+ * drift, this suite proves one project is safe while every user talks to another
+ * — the most reassuring possible way to be wrong. Compared, never printed.
+ */
+{
+  const mod = readFileSync(resolve(here, '..', 'src/rag/directory.ts'), 'utf8');
+  const got = (k) => mod.match(new RegExp(`${k}: '([^']*)'`))?.[1] ?? '';
+  const modUrl = got('url');
+  const modKey = got('publishableKey');
+  if (modUrl.includes('REPLACE_ME') || modKey.includes('REPLACE_ME')) {
+    console.error(
+      'FAIL  src/rag/directory.ts still has its placeholder. Paste the directory\n' +
+        "      project's URL and sb_publishable_ key into it (never the secret key).",
+    );
+    process.exit(1);
+  }
+  if (modUrl.replace(/\/$/, '') !== U || modKey !== PK) {
+    console.error(
+      'FAIL  src/rag/directory.ts does not match .env2 — the extension would talk to a\n' +
+        '      different project than this check just verified.',
+    );
+    process.exit(1);
+  }
+  if (/sb_secret_/.test(mod)) {
+    console.error('FAIL  src/rag/directory.ts contains a secret key. It bypasses RLS; remove it.');
+    process.exit(1);
+  }
+  // Not a counted assertion — a precondition. Printing PASS here would make the
+  // tally at the bottom disagree with the number of PASS lines above it.
+  console.log('ok    committed directory config matches the project under test');
+}
+
 let pass = 0;
 const failures = [];
 const ok = (cond, name, note = '') => {
