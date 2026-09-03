@@ -1,5 +1,15 @@
--- The directory project. Run this ONCE, in the SQL editor of the project that is
--- NOT your corpus. Idempotent — safe to re-run after an edit.
+-- The directory project. Run this in the SQL editor of the **admin/directory**
+-- project — the one whose credentials are in `.env2` — and never in the corpus
+-- project in `.env`.
+--
+-- Idempotent: every statement is `if not exists`, `drop … if exists` or
+-- `create or replace`, so re-running the whole file over an earlier version is
+-- the intended way to apply a fix. Paste the lot; there is no partial version to
+-- keep track of.
+--
+-- Running it against the corpus project would fail rather than corrupt anything —
+-- there is no `sessions` table there for the policies to attach to — but the two
+-- are easy to transpose, so check the URL in the dashboard before pasting.
 --
 -- ## What this project is, and what it is emphatically not
 --
@@ -176,6 +186,13 @@ create policy own_invites_visible on invites for select
 -- `security definer` means this runs as its owner and can read rows the caller
 -- cannot — so the WHERE clause is the entire access control for the most
 -- sensitive thing this project stores. Read it as such before changing it.
+--
+-- The parameter keeps the readable name `session_code` even though `invites` has
+-- a column of that name, which the `p_code` note above warns against. It is safe
+-- here only because every column reference below is table-qualified, so the bare
+-- `session_code` can bind to nothing but the parameter. If you add a clause to
+-- this function, qualify its columns too — an unqualified `session_code` inside
+-- the `invites` subquery would bind to the column and quietly match every row.
 create or replace function credentials_for(session_code text)
 returns table (project_url text, anon_key text)
 language sql
