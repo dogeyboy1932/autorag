@@ -10,10 +10,49 @@ import {
   resolveSession,
 } from '@/src/rag/directory';
 import { createLocalSession, PERSONAL } from '@/src/rag/sessions';
-import { syncNow } from '@/src/rag/sync';
+import { refresh as refreshCloud, syncNow } from '@/src/rag/sync';
 import { setActiveSession } from '@/src/rag/store';
 import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
 import { Button } from '@/components/ui';
+import type { Account } from '@/components/Auth';
+
+async function syncAccount(
+  account: Account,
+  save: (next: Account) => void,
+): Promise<{ pulled: number }> {
+  const host = account.host;
+  const project = account.project;
+  const sessionId = account.sessionId ?? PERSONAL;
+  const cloud = host
+    ? { url: host.url, anonKey: host.anonKey, sessionId }
+    : project && { url: project.url, anonKey: project.anonKey, sessionId };
+  if (!cloud) throw new Error('Attach a project or join a session before syncing.');
+
+  const auth = host
+    ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
+    : {
+        accessToken: project!.accessToken,
+        refreshToken: project!.refreshToken,
+        email: account.email,
+        userId: project!.userId,
+      };
+
+  try {
+    const result = await syncNow(cloud, auth);
+    return { pulled: result.pulled };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    if (host || !/jwt|expired|invalid token|401/i.test(detail)) throw err;
+
+    const renewed = await refreshCloud(cloud, auth);
+    save({
+      ...account,
+      project: { ...project!, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
+    });
+    const result = await syncNow(cloud, renewed);
+    return { pulled: result.pulled };
+  }
+}
 
 /**
  * The web app's half of the session UI: the shared component plus the operations
@@ -152,32 +191,18 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
               userId: project!.userId,
             };
 
-        const result = await syncNow(cloud, auth);
-        return { pulled: result.pulled };
+        return await syncAccount({ ...account!, sessionId: next.sessionId, host }, save);
       },
     };
   }, [account, save]);
 
   useEffect(() => {
     const syncActiveSession = async () => {
-      const host = account?.host;
-      const project = account?.project;
-      const cloud = host
-        ? { url: host.url, anonKey: host.anonKey, sessionId: account?.sessionId }
-        : project && { url: project.url, anonKey: project.anonKey, sessionId: account?.sessionId };
-      if (!cloud || syncing.current) return;
+      if (!account || syncing.current) return;
 
       syncing.current = true;
       try {
-        const auth = host
-          ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
-          : {
-              accessToken: project!.accessToken,
-              refreshToken: project!.refreshToken,
-              email: account?.email ?? '',
-              userId: project!.userId,
-            };
-        await syncNow(cloud, auth);
+        await syncAccount(account, save);
         onChanged?.();
       } catch {
         // The explicit Sync action remains available after a transient failure.
@@ -203,39 +228,22 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
 }
 
 export function WebSyncButton() {
-  const [account] = useAccount();
+  const [account, save] = useAccount();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function sync() {
-    const host = account?.host;
-    const project = account?.project;
-    const sessionId = account?.sessionId ?? PERSONAL;
-    if (host && !account?.sessionId) {
+    if (account?.host && !account.sessionId) {
       setMessage('The joined session is missing its session ID. Rejoin it before syncing.');
       return;
     }
-    const cloud = host
-      ? { url: host.url, anonKey: host.anonKey, sessionId }
-      : project && { url: project.url, anonKey: project.anonKey, sessionId };
-    if (!cloud) {
-      setMessage('Attach a project or join a session before syncing.');
-      return;
-    }
+    if (!account) return;
 
     setBusy(true);
     setMessage(null);
     try {
-      const auth = host
-        ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
-        : {
-            accessToken: project!.accessToken,
-            refreshToken: project!.refreshToken,
-            email: account?.email ?? '',
-            userId: project!.userId,
-          };
-      const result = await syncNow(cloud, auth);
-          emitCorpusChange();
+      const result = await syncAccount(account, save);
+      emitCorpusChange();
       setMessage(`Synced ${result.pulled} passage(s) from other devices.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
