@@ -1551,7 +1551,15 @@ function Recall({ settings }: { settings: AskSettings }) {
  */
 const APP_URL = 'https://autorag-web.netlify.app/';
 
-function AccountGate({ account, onRecheck }: { account: AccountState | null; onRecheck: () => void }) {
+function AccountGate({
+  account,
+  onRecheck,
+  onGuest,
+}: {
+  account: AccountState | null;
+  onRecheck: () => void;
+  onGuest?: () => void;
+}) {
   if (account) {
     return (
       <p className="note">
@@ -1568,24 +1576,40 @@ function AccountGate({ account, onRecheck }: { account: AccountState | null; onR
       </p>
       <div className="row">
         <button className="primary" onClick={() => void chrome.tabs.create({ url: APP_URL })}>
-          Open the web app
+          Sign in
         </button>
         <button onClick={onRecheck}>Check again</button>
       </div>
+      {onGuest && (
+        <>
+          <p className="note">
+            Or work without an account. Everything stays in this browser — you can keep,
+            review, search and ask, but not join sessions or sync anywhere. You can sign in
+            later and keep what you gathered.
+          </p>
+          <div className="row">
+            <button onClick={onGuest}>Continue as guest</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
 /** Reads the mirrored account, and keeps asking until there is one. */
-function useAccount(): [AccountState | null, () => void] {
+function useAccount(): [AccountState | null, () => void, boolean] {
   const [account, setAccount] = useState<AccountState | null>(null);
+  const [ready, setReady] = useState(false);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let live = true;
     const read = async () => {
       const a = await ask<AccountState | null>({ kind: 'getAccount' });
-      if (live) setAccount(a);
+      if (live) {
+        setAccount(a);
+        setReady(true);
+      }
       return a;
     };
     void read();
@@ -1603,7 +1627,7 @@ function useAccount(): [AccountState | null, () => void] {
     };
   }, [nonce]);
 
-  return [account, () => setNonce((n) => n + 1)];
+  return [account, () => setNonce((n) => n + 1), ready];
 }
 
 function PanelSessions({
@@ -1698,7 +1722,7 @@ function SyncStatus() {
 }
 
 function App() {
-  const [account, recheckAccount] = useAccount();
+  const [account, recheckAccount, accountReady] = useAccount();
   const [tab, setTab] = useState<Tab>('library');
   const [pending, setPending] = useState<Pending[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -1725,6 +1749,45 @@ function App() {
     { id: 'library', label: 'Library', badge: pending.length },
     { id: 'settings', label: 'Settings' },
   ];
+
+  /*
+   * Nothing before there is somebody to do it for.
+   *
+   * The gate used to sit inside the Settings tab, so opening the panel dropped you
+   * straight into Ask with no hint that an account existed — the corpus you were
+   * looking at belonged to nobody, and none of it would sync anywhere. Guest counts
+   * as somebody: choosing to work locally is a decision, not the absence of one.
+   *
+   * `accountReady` keeps this from flashing at a person who *is* signed in, which
+   * is the most alarming thing a panel holding your notes can do on open.
+   */
+  if (!accountReady) return <div className="app" />;
+  if (!account) {
+    return (
+      <div className="app">
+        <header className="top">
+          <strong>Autorag</strong>
+        </header>
+        <div className="tab-body">
+          <section>
+            <h2>
+              Sign in <span className="soft">on the web app</span>
+            </h2>
+            <AccountGate
+              account={null}
+              onRecheck={recheckAccount}
+              onGuest={() => {
+                void ask({
+                  kind: 'setAccount',
+                  account: { email: '', guest: true, sessionId: PERSONAL },
+                }).then(recheckAccount);
+              }}
+            />
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">

@@ -247,6 +247,32 @@ try {
   const extId = swTarget ? new URL(swTarget.url()).host : null;
   const panel = await browser.newPage();
   await panel.goto(`chrome-extension://${extId}/sidepanel.html`, { waitUntil: 'domcontentloaded' });
+
+  /*
+   * Get past the account gate as a guest.
+   *
+   * The panel now asks who you are before showing anything, because a corpus that
+   * belongs to nobody syncs nowhere and captures into no session. Guest is the
+   * honest answer for a probe: local only, no account, which is exactly the mode
+   * every assertion below is written against.
+   *
+   * Clicked rather than written straight into storage, so the button a person
+   * actually presses is on the tested path — seeding the state directly would
+   * leave the gate itself unexercised and let it break unnoticed.
+   */
+  await panel.waitForFunction(
+    () => [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('Continue as guest')),
+    { timeout: 30_000 },
+  );
+  await panel.evaluate(() => {
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('Continue as guest'))
+      ?.click();
+  });
+  await panel.waitForFunction(
+    () => !document.body.innerText.includes('Continue as guest'),
+    { timeout: 30_000 },
+  );
   await new Promise((r) => setTimeout(r, 1500));
 
   const read = await panel.evaluate(async () => {

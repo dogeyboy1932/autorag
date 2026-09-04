@@ -118,6 +118,15 @@ export type Request =
 export interface AccountState {
   email: string;
   demo?: boolean;
+  /**
+   * Working without an account, on purpose.
+   *
+   * Stored rather than inferred from the absence of a directory session, because
+   * "no account" and "chose to work locally" look identical from the outside and
+   * mean opposite things: one is a person who has not decided yet, the other is a
+   * decision. Reading the first as the second is what left the panel gated after
+   * somebody had already answered it.
+   */
   guest?: boolean;
   directory?: { accessToken: string; refreshToken: string; userId: string };
   sessionId?: string;
@@ -133,6 +142,8 @@ export interface CloudSettings {
   email?: string;
   /** This person's id in their *own* project — what RLS scopes their rows by. */
   userId?: string;
+  /** Working without an account, on purpose. See `AccountState.guest`. */
+  guest?: boolean;
   /**
    * True while this is a burner account made by Demo mode.
    *

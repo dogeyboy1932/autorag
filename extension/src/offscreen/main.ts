@@ -335,6 +335,7 @@ async function handle(request: Request): Promise<unknown> {
           email: a?.email ?? '',
           directory: a?.directory,
           demo: a?.demo,
+          guest: a?.guest,
           sessionId: a?.sessionId,
           host: a?.host,
         },
@@ -345,9 +346,20 @@ async function handle(request: Request): Promise<unknown> {
 
     case 'getAccount': {
       const c = await storage.get<CloudSettings>('cloud');
-      return c?.directory
-        ? { email: c.email ?? '', demo: c.demo, directory: c.directory, sessionId: c.sessionId, host: c.host }
-        : null;
+      /*
+       * A guest counts. Returning null unless there was a directory session meant
+       * choosing to work locally read as never having chosen at all, so the panel
+       * stayed gated behind a question the person had just answered.
+       */
+      if (!c?.directory && !c?.guest) return null;
+      return {
+        email: c.email ?? '',
+        demo: c.demo,
+        guest: c.guest,
+        directory: c.directory,
+        sessionId: c.sessionId,
+        host: c.host,
+      };
     }
 
     case 'listSessions': {
