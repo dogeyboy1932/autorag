@@ -259,7 +259,16 @@ try {
   }
 }
 
-const leftover = await admin('/rest/v1/sessions?select=code&code=like.PROBE*');
-console.log(`\ncleanup: ${Array.isArray(leftover) ? leftover.length : '?'} probe rows left behind (0 expected)`);
+/*
+ * Profiles as well as sessions. This counted only sessions, so a leaked profile
+ * row went unnoticed and was later found sitting in the live directory — exactly
+ * the residue a cleanup check exists to catch.
+ */
+const leftSessions = await admin('/rest/v1/sessions?select=code&code=like.PROBE*');
+const leftProfiles = await admin('/rest/v1/profiles?select=user_id&email=like.*probe*');
+const left =
+  (Array.isArray(leftSessions) ? leftSessions.length : 0) +
+  (Array.isArray(leftProfiles) ? leftProfiles.length : 0);
+console.log(`\ncleanup: ${left} probe row(s) left behind (0 expected)`);
 console.log(`${pass} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);
