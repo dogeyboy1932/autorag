@@ -99,11 +99,31 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
       },
 
       switchTo: async (target) => {
-        const next = {
-          ...account!,
-          sessionId: target?.id ?? PERSONAL,
-          host: target?.host,
-        };
+        const project = account?.project;
+
+        /*
+         * Work out where this session actually lives before syncing it.
+         *
+         * A session picked from the switcher is only a code, and the list mixes
+         * sessions this person hosts with sessions they were invited to. Assuming
+         * the local project was the bug: switching to somebody else's session
+         * queried *your* database for their session id, found nothing, and showed
+         * an empty corpus with no error — which is exactly what "I joined and
+         * cannot see it" looks like.
+         *
+         * Having a project of your own does not make a joined session yours. The
+         * directory is the only thing that knows the difference, so it is asked,
+         * unless the caller already looked it up (the join path).
+         */
+        let host = target?.host;
+        if (target && !host && session) {
+          const resolved = await resolveSession(target.id, session);
+          if (resolved && resolved.projectUrl.replace(/\/$/, '') !== project?.url.replace(/\/$/, '')) {
+            host = { url: resolved.projectUrl, anonKey: resolved.anonKey, name: target.id };
+          }
+        }
+
+        const next = { ...account!, sessionId: target?.id ?? PERSONAL, host };
         save(next);
 
         /*
@@ -111,14 +131,13 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
          * session was shared with and signed in as nobody — which is exactly what a
          * member is. Own sessions use the attached project instead.
          */
-        const project = account?.project;
-        const cloud = target?.host
-          ? { url: target.host.url, anonKey: target.host.anonKey, sessionId: target.id }
+        const cloud = host
+          ? { url: host.url, anonKey: host.anonKey, sessionId: target!.id }
           : project && { url: project.url, anonKey: project.anonKey, sessionId: next.sessionId };
         if (!cloud) return { pulled: 0 };
 
-        const auth = target?.host
-          ? { accessToken: target.host.anonKey, refreshToken: '', email: '', userId: '' }
+        const auth = host
+          ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
           : {
               accessToken: project!.accessToken,
               refreshToken: project!.refreshToken,

@@ -1737,11 +1737,32 @@ function PanelSessions({
         if (!res.ok) throw new Error(res.error);
       },
       switchTo: async (target) => {
-        const next: CloudSettings = {
-          ...cloud,
-          sessionId: target?.id,
-          host: target?.host,
-        };
+        /*
+         * Find out where the session lives before syncing it.
+         *
+         * The switcher lists sessions this person hosts alongside sessions they
+         * were invited to, and a row is only a code. Assuming the attached project
+         * was the bug: switching to somebody else's session queried *your* database
+         * for their session id, found nothing, and showed an empty corpus with no
+         * error at all. Having a project of your own does not make a joined session
+         * yours; only the directory knows which is which.
+         *
+         * `joinSession` is the lookup — redeeming a code and switching to it are
+         * the same question about credentials — and it is skipped when the caller
+         * has already done it.
+         */
+        let host = target?.host;
+        if (target && !host) {
+          const resolved = await askDetailed<{
+            code: string;
+            host: { url: string; anonKey: string; name: string };
+          }>({ kind: 'joinSession', cloud, code: target.id });
+          if (resolved.ok && resolved.data.host.url.replace(/\/$/, '') !== cloud.url.replace(/\/$/, '')) {
+            host = resolved.data.host;
+          }
+        }
+
+        const next: CloudSettings = { ...cloud, sessionId: target?.id, host };
         save(next);
         const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
         if (!res.ok) throw new Error(res.error);

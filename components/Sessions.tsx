@@ -38,7 +38,15 @@ export interface SessionsApi {
   create(name: string, openJoin: boolean): Promise<{ code: string; name: string }>;
   join(code: string): Promise<{ code: string; host: { url: string; anonKey: string; name: string } }>;
   invite(code: string, email: string): Promise<void>;
-  /** Move to a session (or back to personal) and reconcile. Returns what arrived. */
+  /**
+   * Move to a session (or back to personal) and reconcile.
+   *
+   * `host` is optional because the caller usually does not know it: a session
+   * picked from the list is just a code, and whether it lives in this person's
+   * project or somebody else's is a question only the directory can answer. The
+   * implementation resolves it. Passing one is a shortcut for the join path, which
+   * has just looked it up.
+   */
   switchTo(session: { id: string; host?: { url: string; anonKey: string; name: string } } | null): Promise<{ pulled: number }>;
 }
 
