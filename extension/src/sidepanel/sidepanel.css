@@ -248,6 +248,9 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .fold > :not(summary) { margin-left: 13px; margin-right: 13px; }
 .fold > :last-child { margin-bottom: 12px; }
 .fold[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.settings-fold { flex: none; }
+.settings-fold > summary { color: var(--fg); font-size: 13px; font-weight: 600; }
+.settings-fold > .card, .settings-fold > section { margin: 0 13px 13px; }
 
 /* ------------------------------------------------------------------ polish */
 header.top, .app > header {

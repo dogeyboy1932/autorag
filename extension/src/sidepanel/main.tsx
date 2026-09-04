@@ -828,13 +828,18 @@ function AnswerSettings({
   save: (next: AskSettings) => void;
 }) {
   const [draft, setDraft] = useState('');
+  const [open, setOpen] = useState(!settings.apiKey);
   const model = ASK_MODELS.find((m) => m.id === settings.model) ?? ASK_MODELS[0];
 
+  useEffect(() => {
+    if (settings.apiKey) setOpen(false);
+  }, [settings.apiKey]);
+
   return (
-    <section>
-      <h2>
+    <details className="fold settings-fold" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
         Answers <span className="soft">{settings.apiKey ? model.label : 'off'}</span>
-      </h2>
+      </summary>
       <div className="card">
           <p className="note">
             Without a key, Recall returns passages and nothing leaves your machine. With one,
@@ -881,7 +886,7 @@ function AnswerSettings({
             unless you ask a question.
           </p>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -1884,6 +1889,7 @@ function App() {
       <header>
         <h1>Autorag</h1>
         <div className="chips">
+          <AccountGate account={account} onRecheck={recheckAccount} />
           <ModelStatus stats={stats} />
           <WebmcpStatus />
         </div>
@@ -1934,19 +1940,18 @@ function App() {
 
       <div className={tab === 'settings' ? 'pane' : 'pane off'}>
         <AnswerSettings settings={settings} save={saveSettings} />
-        <hr />
-        <section>
-          <h2>
-            Account <span className="soft">created on the web app</span>
-          </h2>
-          <AccountGate account={account} onRecheck={recheckAccount} />
-        </section>
-        <hr />
-        <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
-        <hr />
-        <PanelSessions cloud={cloud} save={saveCloud} account={account} onChanged={refresh} />
-        <hr />
-        <Activity />
+        <details className="fold settings-fold">
+          <summary>Sessions <span className="soft">{cloud.sessionId ?? PERSONAL}</span></summary>
+          <PanelSessions cloud={cloud} save={saveCloud} account={account} onChanged={refresh} />
+        </details>
+        <details className="fold settings-fold">
+          <summary>Activity</summary>
+          <Activity />
+        </details>
+        <details className="fold settings-fold">
+          <summary>Project setup <span className="soft">optional</span></summary>
+          <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
+        </details>
       </div>
 
       {/*
