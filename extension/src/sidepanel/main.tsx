@@ -1812,6 +1812,17 @@ function PanelSessions({
             account: { ...account, sessionId: target?.id, host },
           });
         }
+        /*
+         * Switching always reconciles — that is the point of switching — but only
+         * when there is somewhere to reconcile with.
+         *
+         * Without a project and without a host there is no cloud copy of anything,
+         * so `sync` would refuse with "No corpus to sync. Attach your own Supabase
+         * project…" and the switch would report a failure. Moving into your own
+         * personal corpus with nothing attached is not a failure: the passages are
+         * already here, and there is nothing to fetch. Say nothing and show them.
+         */
+        if (!next.accessToken && !next.host) return { pulled: 0 };
         const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
         if (!res.ok) throw new Error(res.error);
         return { pulled: res.data.pulled };

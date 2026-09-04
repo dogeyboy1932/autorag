@@ -19,14 +19,23 @@ import type { Account } from '@/components/Auth';
 async function syncAccount(
   account: Account,
   save: (next: Account) => void,
-): Promise<{ pulled: number }> {
+): Promise<{ pulled: number; synced: boolean }> {
   const host = account.host;
   const project = account.project;
   const sessionId = account.sessionId ?? PERSONAL;
   const cloud = host
     ? { url: host.url, anonKey: host.anonKey, sessionId }
     : project && { url: project.url, anonKey: project.anonKey, sessionId };
-  if (!cloud) throw new Error('Attach a project or join a session before syncing.');
+  /*
+   * Nothing attached and no host means there is no cloud copy to reconcile with.
+   * That is the ordinary state of somebody working locally, so switching sessions
+   * must not report it as a failure — the passages are already here.
+   *
+   * `WebSyncButton` calls this too, and there the silence would be wrong: pressing
+   * Sync and being told nothing is worse than being told why. It checks first and
+   * says so itself.
+   */
+  if (!cloud) return { pulled: 0, synced: false };
 
   const auth = host
     ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
@@ -39,7 +48,7 @@ async function syncAccount(
 
   try {
     const result = await syncNow(cloud, auth);
-    return { pulled: result.pulled };
+    return { pulled: result.pulled, synced: true };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     if (host || !/jwt|expired|invalid token|401/i.test(detail)) throw err;
@@ -50,7 +59,7 @@ async function syncAccount(
       project: { ...project!, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
     });
     const result = await syncNow(cloud, renewed);
-    return { pulled: result.pulled };
+    return { pulled: result.pulled, synced: true };
   }
 }
 
@@ -241,7 +250,11 @@ export function WebSyncButton() {
     try {
       const result = await syncAccount(account, save);
       emitCorpusChange();
-      setMessage(`Synced ${result.pulled} passage(s) from other devices.`);
+      setMessage(
+        result.synced
+          ? `Synced ${result.pulled} passage(s) from other devices.`
+          : 'Nothing to sync with yet — attach a project under Settings, or join a session.',
+      );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
