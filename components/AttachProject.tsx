@@ -20,6 +20,16 @@ import { SCHEMA_SQL, signIn, signUp } from '@/src/rag/sync';
  */
 export default function AttachProject() {
   const [account, save] = useAccount();
+  /*
+   * Prefilled with the account email, and editable.
+   *
+   * The project's auth user is usually the same address as the account — most
+   * people sign up for both with one email — but it does not have to be: the
+   * project may predate the account, or belong to a work address. Prefilling saves
+   * the common case from retyping; leaving it editable means the uncommon one is
+   * not a dead end with no field to correct.
+   */
+  const [projectEmail, setProjectEmail] = useState(account?.email ?? '');
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
   const [password, setPassword] = useState('');
@@ -56,7 +66,7 @@ export default function AttachProject() {
     setMsg(null);
     try {
       const cfg = { url: url.trim(), anonKey: anonKey.trim() };
-      const email = account!.email;
+      const email = projectEmail.trim() || account!.email;
       const project = create
         ? await signUp(cfg, email, password)
         : await signIn(cfg, email, password);
@@ -68,9 +78,15 @@ export default function AttachProject() {
        * person hosts resolves to nothing for everyone they hand the code to — and
        * they would have no way to see that from their own side.
        */
+      /*
+       * The profile records the *account* email, not whatever address the project
+       * happens to be signed in under. Invites are matched against the account
+       * email, so writing the project one here would make an invitation land on an
+       * address the invitee never sees.
+       */
       await publishProfile(
-        { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email, userId: dir.userId },
-        { userId: dir.userId, email, cloud: cfg },
+        { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email: account!.email, userId: dir.userId },
+        { userId: dir.userId, email: account!.email, cloud: cfg },
       );
 
       save({
@@ -132,6 +148,14 @@ export default function AttachProject() {
         <input placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} style={field} />
       </div>
       <div style={row}>
+        <input
+          placeholder="email for this project"
+          value={projectEmail}
+          onChange={(e) => setProjectEmail(e.target.value)}
+          style={field}
+        />
+      </div>
+      <div style={row}>
         <input placeholder="publishable key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} style={field} />
       </div>
       <div style={row}>
@@ -144,10 +168,10 @@ export default function AttachProject() {
         />
       </div>
       <div style={row}>
-        <Button tone="primary" disabled={busy !== null || !url.trim() || !anonKey.trim() || !password} onClick={() => void attach(true)}>
+        <Button tone="primary" disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()} onClick={() => void attach(true)}>
           {busy === 'Creating…' ? '…' : 'Create'}
         </Button>
-        <Button disabled={busy !== null || !url.trim() || !anonKey.trim() || !password} onClick={() => void attach(false)}>
+        <Button disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()} onClick={() => void attach(false)}>
           {busy === 'Connecting…' ? '…' : 'Connect'}
         </Button>
       </div>

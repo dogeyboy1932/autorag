@@ -81,6 +81,16 @@ export type Request =
   | { kind: 'signInAnonymously' }
   | { kind: 'signOut' }
   /*
+   * The web app handing its account to the extension.
+   *
+   * It only travels this direction. `externally_connectable` lets a page message
+   * the extension, not the reverse, and the extension cannot reach into a tab that
+   * may not be open — so the app pushes on every change rather than the panel
+   * polling for something that might never appear.
+   */
+  | { kind: 'setAccount'; account: AccountState | null }
+  | { kind: 'getAccount' }
+  /*
    * Hosting: attach your own Supabase project. Separate password on purpose — it
    * authenticates to a different system, and making them match means changing one
    * silently breaks the other.
@@ -96,6 +106,23 @@ export type Request =
   | { kind: 'inviteToSession'; cloud: CloudSettings; code: string; email: string }
   /** Move between sessions already reachable, including back to personal. */
   | { kind: 'switchSession'; cloud: CloudSettings; sessionId: string };
+
+/**
+ * Who is signed in, as the web app knows it.
+ *
+ * Identity is created in one place — the web app — and mirrored here so the panel
+ * can show sessions without ever offering an account form of its own. That is what
+ * makes being signed into two different accounts impossible rather than merely
+ * discouraged.
+ */
+export interface AccountState {
+  email: string;
+  demo?: boolean;
+  guest?: boolean;
+  directory?: { accessToken: string; refreshToken: string; userId: string };
+  sessionId?: string;
+  host?: { url: string; anonKey: string; name: string };
+}
 
 /** Where a synced corpus lives. Stored in chrome.storage.local, like the API key. */
 export interface CloudSettings {

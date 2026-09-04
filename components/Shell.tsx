@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Auth, { type Account } from '@/components/Auth';
+import { askExtension } from '@/src/webmcp/extension-bridge';
 
 const KEY = 'autorag.account';
 
@@ -39,6 +40,29 @@ export function useAccount(): [Account | null, (next: Account | null) => void, b
     } catch {
       /* private mode: it works for this tab and does not survive a reload */
     }
+
+    /*
+     * Hand it to the extension, if one is there.
+     *
+     * Identity is created here and only here, so the panel has no account form and
+     * would otherwise have no way to know who is using it. This only ever travels
+     * one way: `externally_connectable` lets a page message the extension, not the
+     * reverse, and the extension cannot reach a tab that may not be open.
+     *
+     * Failure is silent by design — most people have no extension, and that is not
+     * a fault worth interrupting anyone about.
+     */
+    void askExtension({
+      kind: 'setAccount',
+      account: next && {
+        email: next.email,
+        demo: next.demo,
+        guest: next.guest,
+        directory: next.directory,
+        sessionId: next.sessionId,
+        host: next.host,
+      },
+    }).catch(() => {});
   };
 
   return [account, save, ready];

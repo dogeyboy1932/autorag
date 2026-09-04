@@ -301,6 +301,30 @@ async function handle(request: Request): Promise<unknown> {
       };
     }
 
+    case 'setAccount': {
+      const current = (await storage.get<CloudSettings>('cloud')) ?? { url: '', anonKey: '' };
+      const a = request.account;
+      await storage.set({
+        cloud: {
+          ...current,
+          email: a?.email ?? '',
+          directory: a?.directory,
+          demo: a?.demo,
+          sessionId: a?.sessionId,
+          host: a?.host,
+        },
+      });
+      record('done', a ? `Signed in as ${a.email || 'demo'}` : 'Signed out');
+      return { ok: true };
+    }
+
+    case 'getAccount': {
+      const c = await storage.get<CloudSettings>('cloud');
+      return c?.directory
+        ? { email: c.email ?? '', demo: c.demo, directory: c.directory, sessionId: c.sessionId, host: c.host }
+        : null;
+    }
+
     case 'listSessions': {
       const dir = request.cloud.directory;
       if (!dir) throw new Error('Not signed in, so there are no sessions to list.');
