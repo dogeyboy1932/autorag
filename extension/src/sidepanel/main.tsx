@@ -447,10 +447,11 @@ interface Source {
  * searchable but rank lower and come back flagged, so the record of what you once
  * believed survives. Forgetting is permanent and asks twice.
  */
-function Corpus({ onChange, count }: { onChange: () => void; count?: number }) {
+function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: number; cloud: CloudSettings }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const refresh = useCallback(async () => {
     setSources((await ask<Source[]>({ kind: 'listSources' })) ?? []);
@@ -466,6 +467,14 @@ function Corpus({ onChange, count }: { onChange: () => void; count?: number }) {
   async function act(request: Request) {
     await ask(request);
     setConfirming(null);
+    await refresh();
+    onChange();
+  }
+
+  async function sync() {
+    setSyncing(true);
+    await ask({ kind: 'sync', cloud });
+    setSyncing(false);
     await refresh();
     onChange();
   }
@@ -539,6 +548,11 @@ function Corpus({ onChange, count }: { onChange: () => void; count?: number }) {
 
           {sources.length > 0 && (
             <div className="row" style={{ marginTop: 4 }}>
+              {(cloud.accessToken || cloud.host) && (
+                <button className="primary" onClick={() => void sync()} disabled={syncing}>
+                  {syncing ? 'Syncing…' : 'Sync now'}
+                </button>
+              )}
               {confirming === '__all__' ? (
                 <button className="danger" onClick={() => act({ kind: 'wipe' })}>
                   Really erase everything?
@@ -1031,16 +1045,6 @@ function Memory({
     onSynced();
   }
 
-  async function sync() {
-    setBusy('syncing');
-    setMsg(null);
-    const res = await askDetailed<{ pulled: number; deleted: number }>({ kind: 'sync', cloud });
-    setBusy(null);
-    if (!res.ok) return setMsg(res.error);
-    setMsg(`Synced · ${res.data.pulled} new here, ${res.data.deleted} removed elsewhere.`);
-    onSynced();
-  }
-
   return (
     <section>
       <h2>
@@ -1148,9 +1152,6 @@ function Memory({
           )}
           {canSync && (
             <div className="row">
-              <button className="primary" onClick={() => void sync()} disabled={busy !== null}>
-                {busy === 'syncing' ? 'Syncing…' : 'Sync now'}
-              </button>
               {signedIn && (
                 <button
                   className="danger"
@@ -1928,7 +1929,7 @@ function App() {
             )}
           </section>
           <hr />
-          <Corpus onChange={refresh} count={stats?.source_count} />
+          <Corpus onChange={refresh} count={stats?.source_count} cloud={cloud} />
       </div>
 
       <div className={tab === 'settings' ? 'pane' : 'pane off'}>

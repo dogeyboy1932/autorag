@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import Sessions, { type SessionsApi } from '@/components/Sessions';
 import { useAccount } from '@/components/Shell';
 import {
@@ -12,6 +12,7 @@ import {
 import { createLocalSession, PERSONAL } from '@/src/rag/sessions';
 import { syncNow } from '@/src/rag/sync';
 import { setActiveSession } from '@/src/rag/store';
+import { onCorpusChange } from '@/src/rag/bus';
 
 /**
  * The web app's half of the session UI: the shared component plus the operations
@@ -24,6 +25,7 @@ import { setActiveSession } from '@/src/rag/store';
  */
 export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
   const [account, save] = useAccount();
+  const syncing = useRef(false);
 
   const api: SessionsApi = useMemo(() => {
     const dir = account?.directory;
@@ -154,6 +156,37 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
       },
     };
   }, [account, save]);
+
+  useEffect(() => {
+    const syncActiveSession = async () => {
+      const host = account?.host;
+      const project = account?.project;
+      const cloud = host
+        ? { url: host.url, anonKey: host.anonKey, sessionId: account?.sessionId }
+        : project && { url: project.url, anonKey: project.anonKey, sessionId: account?.sessionId };
+      if (!cloud || syncing.current) return;
+
+      syncing.current = true;
+      try {
+        const auth = host
+          ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
+          : {
+              accessToken: project!.accessToken,
+              refreshToken: project!.refreshToken,
+              email: account?.email ?? '',
+              userId: project!.userId,
+            };
+        await syncNow(cloud, auth);
+        onChanged?.();
+      } catch {
+        // The explicit Sync action remains available after a transient failure.
+      } finally {
+        syncing.current = false;
+      }
+    };
+
+    return onCorpusChange(() => void syncActiveSession());
+  }, [account, onChanged]);
 
   return (
     <Sessions

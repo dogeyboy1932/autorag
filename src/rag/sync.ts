@@ -344,29 +344,11 @@ export async function syncNow(
    */
   const inScope = (x: { sessionId?: string }) => sessionOf(x.sessionId) === sessionOf(c.sessionId);
 
-  /*
-   * Only approved passages leave this machine.
-   *
-   * Everything staged for review is a draft: material a person has not yet
-   * vouched for, sitting next to whatever screening flagged about it. Pushing it
-   * would put half-considered text into a shared corpus and, in a session, in
-   * front of other people — who would have no way to tell it apart from what was
-   * actually kept. Retrieval already refuses pending material; this is the same
-   * rule applied to the wire.
-   *
-   * Rejected passages stay local too, and stay local *forever*: their text is
-   * what future screening matches against, so they are not waste, they are the
-   * record of what was already turned down.
-   */
-  const chunks = allLocalChunks.filter((x) => inScope(x) && x.status === 'approved');
-
-  /*
-   * A source travels only if something of it survived review. Otherwise a page
-   * whose every passage was discarded would still appear in everyone's source
-   * list, citing nothing.
-   */
-  const keptSources = new Set(chunks.map((x) => x.sourceId));
-  const sources = allLocalSources.filter((x) => inScope(x) && keptSources.has(x.id));
+  // Supabase mirrors the complete active session. Retrieval remains approved-only,
+  // but pending and rejected rows must also travel so review decisions and
+  // conflict history stay consistent across devices.
+  const chunks = allLocalChunks.filter((x) => inScope(x));
+  const sources = allLocalSources.filter((x) => inScope(x));
   const deletions = allLocalDeletions.filter(inScope);
 
   /*

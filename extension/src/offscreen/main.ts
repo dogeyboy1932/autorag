@@ -90,7 +90,8 @@ function hostOf(url: string): string {
 }
 
 async function handle(request: Request): Promise<unknown> {
-  setActiveSession((await cloudSettings())?.sessionId);
+  const storedCloud = await storage.get<CloudSettings>('cloud');
+  setActiveSession(storedCloud?.sessionId);
   switch (request.kind) {
     case 'warmup': {
       const s = warmupState();
@@ -166,6 +167,7 @@ async function handle(request: Request): Promise<unknown> {
      */
     case 'sync': {
       const { url, anonKey, accessToken, refreshToken, email, sessionId, host } = request.cloud;
+      setActiveSession(sessionId);
       /*
        * A member of someone else's session has no project and no user of their own
        * in it. They reach it as the **anon** role, holding the publishable key the
@@ -890,7 +892,12 @@ async function cloudSettings() {
    * a new field is a compile error at every call site instead of a no-op.
    */
   const c = await storage.get<CloudSettings>('cloud');
-  if (!c?.url || !c.anonKey || !c.accessToken || !c.refreshToken) return null;
+  if (!c) return null;
+  if (c.host) {
+    if (!c.sessionId || !c.host.url || !c.host.anonKey) return null;
+  } else if (!c.url || !c.anonKey || !c.accessToken || !c.refreshToken) {
+    return null;
+  }
   return c;
 }
 
@@ -919,17 +926,20 @@ async function syncWithRenewal(
     anonKey: c.host?.anonKey ?? c.anonKey,
     ...(c.sessionId ? { sessionId: c.sessionId } : {}),
   };
-  const session = {
-    accessToken: c.accessToken!,
-    refreshToken: c.refreshToken!,
-    email: c.email ?? '',
-    userId: c.userId ?? '',
-  };
+  const session = c.host
+    ? { accessToken: c.host.anonKey, refreshToken: '', email: '', userId: '' }
+    : {
+        accessToken: c.accessToken!,
+        refreshToken: c.refreshToken!,
+        email: c.email ?? '',
+        userId: c.userId ?? '',
+      };
   try {
     return await syncNow(cfg, session, onProgress);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!/jwt|expired|invalid token|401/i.test(message)) throw err;
+    if (c.host) throw err;
     record('working', 'Session expired — renewing');
     const renewed = await refreshSession(cfg, session);
     await storage.set({
