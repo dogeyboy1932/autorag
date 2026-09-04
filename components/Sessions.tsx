@@ -142,25 +142,6 @@ export default function Sessions({
         >
           {active === PERSONAL ? 'In your personal memory' : 'Back to personal'}
         </Button>
-        {/*
-          Always here, never conditional. Sync is how a shared corpus is read at
-          all — a member's whole relationship with it is pulling down what other
-          people kept and pushing back what they changed — and hiding the button
-          behind whether you happen to own a project made it unavailable to
-          precisely the people who live on it.
-        */}
-        <Button
-          tone="primary"
-          disabled={busy !== null}
-          onClick={() =>
-            void go(
-              active === PERSONAL ? null : { id: active, host: hostProject },
-              active === PERSONAL ? 'Personal' : hostedName || active,
-            )
-          }
-        >
-          {busy ? 'Syncing…' : 'Sync now'}
-        </Button>
       </div>
 
       {list.length > 0 && (

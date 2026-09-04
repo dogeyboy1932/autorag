@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import type { Chunk, Source } from '@/src/types';
 import { allChunks, allSources, deleteSourceCascade, setSourceStale } from '@/src/rag/store';
 import { useCorpusData } from '@/src/rag/hooks';
@@ -14,7 +14,7 @@ import { Button, Empty, Panel, Pill } from './ui';
  * browser-mediated confirmation to lean on (API-DELTA D4), so it asks twice
  * here, exactly as the tool requires `confirm: true`.
  */
-export default function CorpusView() {
+export default function CorpusView({ sync }: { sync?: ReactNode }) {
   const load = useCallback(async (): Promise<{ sources: Source[]; chunks: Chunk[] }> => {
     const [sources, chunks] = await Promise.all([allSources(), allChunks()]);
     return { sources, chunks };
@@ -40,7 +40,15 @@ export default function CorpusView() {
   }
 
   return (
-    <Panel title="Corpus" right={<Pill tone="mute">{sources.length} sources</Pill>}>
+    <Panel
+      title="Corpus"
+      right={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+          {sync}
+          <Pill tone="mute">{sources.length} sources</Pill>
+        </span>
+      }
+    >
       {sources.length === 0 ? (
         <Empty>Nothing ingested yet.</Empty>
       ) : (

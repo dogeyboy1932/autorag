@@ -5,7 +5,7 @@ import CorpusView from '@/components/CorpusView';
 import AccountBar from '@/components/AccountBar';
 import AttachProject from '@/components/AttachProject';
 import Shell from '@/components/Shell';
-import WebSessions from '@/components/WebSessions';
+import WebSessions, { WebSyncButton } from '@/components/WebSessions';
 import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
 import IngestForm from '@/components/IngestForm';
@@ -54,7 +54,7 @@ export default function Home() {
         <IngestForm />
         <ReviewQueue />
         <SearchPanel />
-        <CorpusView />
+        <CorpusView sync={<WebSyncButton />} />
         <ActivityLog />
         <DeclarativeIngestForm />
       </div>

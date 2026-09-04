@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Sessions, { type SessionsApi } from '@/components/Sessions';
 import { useAccount } from '@/components/Shell';
 import {
@@ -13,6 +13,7 @@ import { createLocalSession, PERSONAL } from '@/src/rag/sessions';
 import { syncNow } from '@/src/rag/sync';
 import { setActiveSession } from '@/src/rag/store';
 import { onCorpusChange } from '@/src/rag/bus';
+import { Button } from '@/components/ui';
 
 /**
  * The web app's half of the session UI: the shared component plus the operations
@@ -198,5 +199,51 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
       signedIn={Boolean(account?.directory)}
       onChanged={onChanged}
     />
+  );
+}
+
+export function WebSyncButton() {
+  const [account] = useAccount();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function sync() {
+    const host = account?.host;
+    const project = account?.project;
+    const cloud = host
+      ? { url: host.url, anonKey: host.anonKey, sessionId: account?.sessionId }
+      : project && { url: project.url, anonKey: project.anonKey, sessionId: account?.sessionId };
+    if (!cloud) {
+      setMessage('Attach a project or join a session before syncing.');
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const auth = host
+        ? { accessToken: host.anonKey, refreshToken: '', email: '', userId: '' }
+        : {
+            accessToken: project!.accessToken,
+            refreshToken: project!.refreshToken,
+            email: account?.email ?? '',
+            userId: project!.userId,
+          };
+      const result = await syncNow(cloud, auth);
+      setMessage(`Synced ${result.pulled} passage(s) from other devices.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <Button tone="primary" disabled={busy} onClick={() => void sync()}>
+        {busy ? 'Syncing…' : 'Sync now'}
+      </Button>
+      {message && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{message}</span>}
+    </span>
   );
 }
