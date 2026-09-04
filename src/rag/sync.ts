@@ -41,6 +41,7 @@ import {
   applyRemoteDeletion,
   putChunks,
   upsertSource,
+  setActiveSession,
 } from './store';
 import { sessionOf } from './sessions';
 
@@ -321,6 +322,7 @@ export async function syncNow(
   s: Session,
   onProgress?: (message: string) => void,
 ): Promise<SyncResult> {
+  setActiveSession(c.sessionId);
   const [allLocalSources, allLocalChunks, allLocalDeletions] = await Promise.all([
     allSources(),
     allChunks(),

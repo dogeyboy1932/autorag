@@ -14,11 +14,13 @@ import {
   allChunks,
   allSources,
   findSourceByUrl,
+  getActiveSession,
   newId,
   putChunks,
   upsertSource,
 } from './store';
 import { sessionOf } from './sessions';
+import { setActiveSession } from './store';
 
 export interface IngestInput {
   text: string;
@@ -75,6 +77,7 @@ export async function dryRun(input: Pick<IngestInput, 'text' | 'sourceUrl'>): Pr
 }
 
 export async function ingestPassage(input: IngestInput): Promise<IngestResult> {
+  if (input.sessionId !== undefined) setActiveSession(input.sessionId);
   const pieces = chunkText(input.text);
   if (pieces.length === 0) {
     throw new Error('Passage produced no usable chunks after normalization.');
@@ -89,8 +92,8 @@ export async function ingestPassage(input: IngestInput): Promise<IngestResult> {
 
   // Re-ingesting the same URL extends the existing source rather than forking it,
   // so provenance stays one-to-one with the page it came from.
+  const session = input.sessionId === undefined ? getActiveSession() : sessionOf(input.sessionId);
   const existing = await findSourceByUrl(input.sourceUrl);
-  const session = sessionOf(input.sessionId);
   const source: Source = existing ?? {
     id: newId('src'),
     url: input.sourceUrl,

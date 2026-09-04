@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Auth, { type Account } from '@/components/Auth';
 import { askExtension } from '@/src/webmcp/extension-bridge';
+import { setActiveSession } from '@/src/rag/store';
 
 const KEY = 'autorag.account';
 
@@ -61,6 +62,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     }
     setReady(true);
   }, []);
+
+  useEffect(() => {
+    if (ready) setActiveSession(account?.sessionId);
+  }, [account?.sessionId, ready]);
 
   const save = useCallback((next: Account | null) => {
     setAccount(next);

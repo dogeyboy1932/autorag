@@ -1773,15 +1773,17 @@ function PanelSessions({
   );
 
   return (
-    <Sessions
-      api={api}
-      activeSessionId={cloud.sessionId ?? PERSONAL}
-      hostedName={cloud.host?.name}
-      hostProject={cloud.host}
-      canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
-      signedIn={Boolean(account?.directory)}
-      onChanged={onChanged}
-    />
+    <div className="session-surface">
+      <Sessions
+        api={api}
+        activeSessionId={cloud.sessionId ?? PERSONAL}
+        hostedName={cloud.host?.name}
+        hostProject={cloud.host}
+        canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
+        signedIn={Boolean(account?.directory)}
+        onChanged={onChanged}
+      />
+    </div>
   );
 }
 

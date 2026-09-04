@@ -17,8 +17,9 @@ export function Panel({
     <section
       style={{
         border: '1px solid var(--border)',
-        borderRadius: 10,
+        borderRadius: 14,
         background: 'var(--panel)',
+        boxShadow: '0 10px 30px rgba(0, 0, 0, .12)',
         overflow: 'hidden',
         ...style,
       }}
@@ -29,14 +30,15 @@ export function Panel({
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
-          padding: '10px 14px',
+          padding: '14px 16px',
+          background: 'rgba(255, 255, 255, .018)',
           borderBottom: '1px solid var(--border)',
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600, letterSpacing: 0.2 }}>{title}</h2>
+        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: 0.2 }}>{title}</h2>
         {right}
       </header>
-      <div style={{ padding: 14 }}>{children}</div>
+      <div style={{ padding: 16 }}>{children}</div>
     </section>
   );
 }
@@ -55,9 +57,9 @@ export function Button({
   title?: string;
 }) {
   const tones = {
-    default: { bg: 'transparent', fg: 'var(--fg)', bd: 'var(--border)' },
-    primary: { bg: 'rgba(68,147,248,.15)', fg: 'var(--accent)', bd: 'rgba(68,147,248,.4)' },
-    danger: { bg: 'rgba(248,81,73,.12)', fg: 'var(--bad)', bd: 'rgba(248,81,73,.35)' },
+    default: { bg: 'rgba(255,255,255,.025)', fg: 'var(--fg)', bd: 'var(--border)' },
+    primary: { bg: 'var(--accent)', fg: '#14200f', bd: 'var(--accent)' },
+    danger: { bg: 'rgba(241,124,114,.12)', fg: 'var(--bad)', bd: 'rgba(241,124,114,.4)' },
   }[tone];
   return (
     <button
@@ -68,8 +70,9 @@ export function Button({
         background: tones.bg,
         color: tones.fg,
         border: `1px solid ${tones.bd}`,
-        borderRadius: 6,
-        padding: '5px 11px',
+        borderRadius: 8,
+        padding: '7px 12px',
+        fontWeight: 700,
         font: 'inherit',
         fontSize: 12.5,
         cursor: disabled ? 'not-allowed' : 'pointer',

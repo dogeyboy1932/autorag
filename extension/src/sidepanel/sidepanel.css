@@ -6,9 +6,9 @@
  */
 :root {
   color-scheme: dark;
-  --bg: #14161c; --panel: #1c2029; --panel-2: #232833; --border: #2c313c;
-  --fg: #e9edf4; --muted: #98a1b3; --accent: #6aa6ff;
-  --ok: #56c877; --warn: #e0aa3e; --bad: #f2706a;
+  --bg: #101513; --panel: #17201d; --panel-2: #1d2924; --border: #30413a;
+  --fg: #edf4ed; --muted: #9eaea4; --accent: #8ed66f;
+  --accent-strong: #b9f394; --ok: #7bd88f; --warn: #efbd68; --bad: #f17c72;
   --radius: 12px;
 }
 * { box-sizing: border-box; }
@@ -20,21 +20,23 @@
  * Measured before the fix: a 100-character URL made every card 607px wide no
  * matter how narrow the panel got.
  */
-body { margin: 0; background: var(--bg); color: var(--fg); overflow-wrap: anywhere;
-  font: 13.5px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+body { margin: 0; background:
+  radial-gradient(circle at 100% 0, rgba(142, 214, 111, .12), transparent 18rem),
+  var(--bg); color: var(--fg); overflow-wrap: anywhere;
+  font: 13.5px/1.6 "Avenir Next", Avenir, "Trebuchet MS", sans-serif; }
 /* `height`, not `min-height`: with a minimum, a tall pane grows the page and the
    composer and footer get pushed below the fold instead of staying pinned. */
 .app { padding: 0; display: flex; flex-direction: column; height: 100vh; min-width: 0; }
-header { padding: 14px 16px 10px; }
+header { padding: 15px 16px 12px; }
 
 /* One tab bar, sticky, so switching never requires scrolling back up. */
-.tabs { display: flex; gap: 2px; padding: 0 16px; position: sticky; top: 0; z-index: 5;
-  background: var(--bg); border-bottom: 1px solid var(--border); }
+.tabs { display: flex; gap: 4px; padding: 0 16px; position: sticky; top: 0; z-index: 5;
+  background: rgba(16, 21, 19, .94); border-bottom: 1px solid var(--border); }
 .tab { background: none; border: none; border-bottom: 2px solid transparent;
-  border-radius: 0; padding: 9px 12px; color: var(--muted); font-weight: 500;
+  border-radius: 0; padding: 10px 12px; color: var(--muted); font-weight: 500;
   display: flex; align-items: center; gap: 6px; }
 .tab:hover:not(.on) { background: none; color: var(--fg); }
-.tab.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.tab.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 700; }
 
 /* The gap between sections is the spacing; `hr` marks where one job ends and the
    next begins, which stacked sections alone never made obvious. */
@@ -70,8 +72,9 @@ h1 { font-size: 15px; margin: 0; letter-spacing: -0.01em; }
 h2 { font-size: 13px; margin: 0 0 10px; color: var(--fg);
   letter-spacing: -0.01em; font-weight: 600; }
 .counts { font-size: 11.5px; color: var(--muted); }
-.card { background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 12px 13px; margin-bottom: 10px; }
+.card { background: rgba(23, 32, 29, .92); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 13px 14px; margin-bottom: 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12); }
 .src { color: var(--accent); font-size: 12px; text-decoration: none;
   display: block; margin-bottom: 6px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
@@ -112,7 +115,7 @@ h2 { font-size: 13px; margin: 0 0 10px; color: var(--fg);
 .row > button { flex: 0 1 auto; }
 /* Anything following an input or textarea gets air, whatever wraps it. */
 .card > input + *, .card > textarea + * { margin-top: 10px; }
-input { flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
+input { flex: 1; min-width: 0; background: rgba(0, 0, 0, .16); color: var(--fg);
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; }
 input::placeholder { color: var(--muted); opacity: .8; }
 input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
@@ -124,9 +127,9 @@ button:hover:not(:disabled) { background: var(--border); border-color: var(--mut
 button:disabled { opacity: .45; cursor: default; }
 /* The primary action should read as the obvious next move, not as one more
    equally weighted option in a row of identical grey rectangles. */
-.primary { background: var(--accent); border-color: var(--accent); color: #10131a;
+.primary { background: var(--accent); border-color: var(--accent); color: #14200f;
   font-weight: 600; }
-.primary:hover:not(:disabled) { background: #82b6ff; border-color: #82b6ff; }
+.primary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
 .danger { background: transparent; border-color: rgba(242,112,106,.35); color: var(--bad); }
 .danger:hover:not(:disabled) { background: rgba(242,112,106,.12); border-color: var(--bad); }
 .note { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
@@ -246,10 +249,43 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 .fold > :last-child { margin-bottom: 12px; }
 .fold[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 12px; }
 
+/* ------------------------------------------------------------------ polish */
+header.top, .app > header {
+  background: linear-gradient(180deg, rgba(29, 41, 36, .82), rgba(16, 21, 19, .2));
+}
+.app > header h1, header.top strong { font-size: 18px; letter-spacing: -.45px; }
+.app > header h1::before, header.top strong::before {
+  content: 'A'; display: inline-grid; place-items: center; width: 24px; height: 24px;
+  margin-right: 8px; border-radius: 7px; background: var(--accent); color: #14200f;
+  font-size: 13px; font-weight: 900; vertical-align: -2px;
+}
+.session-surface { padding: 2px 0; }
+.session-surface > section { border-color: #42604f !important; box-shadow: 0 8px 24px rgba(0, 0, 0, .16); }
+.session-surface > section > header { background: rgba(142, 214, 111, .06); }
+.session-surface code { color: var(--accent-strong); }
+.session-surface input { min-height: 34px; }
+.session-surface button { min-height: 32px; }
+.session-surface p { line-height: 1.5; }
+section > h2 { line-height: 1.25; }
+.pane > hr { opacity: .7; }
+footer { background: rgba(16, 21, 19, .96); }
+footer .leaves { color: var(--accent-strong); }
+.empty { padding: 4px 0; }
+
 /* A folded turn shows its question; the answer is the body. */
 .fold.turn > summary { color: var(--muted); font-weight: 400; }
 .fold.turn > summary:hover { color: var(--fg); }
 .fold.turn .text { max-height: none; }
+
+@media (max-width: 360px) {
+  .pane { padding-left: 12px; padding-right: 12px; }
+  .tabs { padding-left: 12px; padding-right: 12px; }
+  header { padding-left: 12px; padding-right: 12px; }
+  footer { padding-left: 12px; padding-right: 12px; }
+  .composer { padding-left: 12px; padding-right: 12px; }
+  .composer .row { flex-wrap: wrap; }
+  .composer .row input { flex-basis: 100%; }
+}
 
 /* ---------------------------------------------------------------- the chat */
 /*

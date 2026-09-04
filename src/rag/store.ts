@@ -12,7 +12,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { Chunk, ChunkId, Conflict, Source, SourceId } from '@/src/types';
 import { emitCorpusChange } from './bus';
-import { PERSONAL } from './sessions';
+import { PERSONAL, sessionOf } from './sessions';
 
 const DB_NAME = 'autorag';
 const DB_VERSION = 3;
@@ -50,6 +50,21 @@ interface AutoragDB extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<AutoragDB>> | null = null;
+let activeSessionId = PERSONAL;
+
+/** Selects the only session visible to local reads and writes. */
+export function setActiveSession(id?: string): void {
+  const next = sessionOf(id);
+  if (next === activeSessionId) return;
+  activeSessionId = next;
+  emitCorpusChange();
+}
+
+export function getActiveSession(): string {
+  return activeSessionId;
+}
+
+const inActiveSession = (row: { sessionId?: string }) => sessionOf(row.sessionId) === activeSessionId;
 
 function db(): Promise<IDBPDatabase<AutoragDB>> {
   if (!dbPromise) {
@@ -100,19 +115,21 @@ export function newId(prefix: string): string {
 // ---------- sources ----------
 
 export async function upsertSource(source: Source): Promise<void> {
-  (await db()).put('sources', source);
+  (await db()).put('sources', { ...source, sessionId: activeSessionId });
 }
 
 export async function getSource(id: SourceId): Promise<Source | undefined> {
-  return (await db()).get('sources', id);
+  const source = await (await db()).get('sources', id);
+  return source && inActiveSession(source) ? source : undefined;
 }
 
 export async function findSourceByUrl(url: string): Promise<Source | undefined> {
-  return (await db()).getFromIndex('sources', 'by-url', url);
+  const sources = await (await db()).getAllFromIndex('sources', 'by-url', url);
+  return sources.find(inActiveSession);
 }
 
 export async function allSources(): Promise<Source[]> {
-  return (await db()).getAll('sources');
+  return (await db()).getAll('sources').then((rows) => rows.filter(inActiveSession));
 }
 
 export async function setSourceStale(
@@ -122,7 +139,7 @@ export async function setSourceStale(
 ): Promise<Source | undefined> {
   const database = await db();
   const source = await database.get('sources', id);
-  if (!source) return undefined;
+  if (!source || !inActiveSession(source)) return undefined;
   const next: Source = { ...source, stale, staleReason: reason };
   await database.put('sources', next);
   emitCorpusChange();
@@ -138,12 +155,14 @@ export async function setSourceStale(
  */
 export async function deleteSourceCascade(id: SourceId): Promise<number> {
   const database = await db();
+  const source = await database.get('sources', id);
+  if (!source || !inActiveSession(source)) return 0;
   const tx = database.transaction(['sources', 'chunks', 'deletions'], 'readwrite');
   const chunkIds = await tx.objectStore('chunks').index('by-source').getAllKeys(id);
   const at = new Date().toISOString();
   // Read the session off the row before it goes: after the delete there is
   // nothing left to ask, and a tombstone with no session syncs into the wrong one.
-  const session = (await tx.objectStore('sources').get(id))?.sessionId;
+  const session = source.sessionId;
   const stamp = session ? { sessionId: session } : {};
   for (const chunkId of chunkIds) {
     await tx.objectStore('chunks').delete(chunkId);
@@ -160,7 +179,7 @@ export async function deleteSourceCascade(id: SourceId): Promise<number> {
 export async function allDeletions(): Promise<
   { id: string; kind: 'source' | 'chunk'; at: string; sessionId?: string }[]
 > {
-  return (await db()).getAll('deletions');
+  return (await db()).getAll('deletions').then((rows) => rows.filter(inActiveSession));
 }
 
 /** Records a deletion observed from another device, and applies it here. */
@@ -182,35 +201,36 @@ export async function applyRemoteDeletion(
 export async function putChunks(chunks: Chunk[]): Promise<void> {
   const database = await db();
   const tx = database.transaction('chunks', 'readwrite');
-  for (const chunk of chunks) tx.store.put(chunk);
+  for (const chunk of chunks) tx.store.put({ ...chunk, sessionId: activeSessionId });
   await tx.done;
 }
 
 export async function getChunk(id: ChunkId): Promise<Chunk | undefined> {
-  return (await db()).get('chunks', id);
+  const chunk = await (await db()).get('chunks', id);
+  return chunk && inActiveSession(chunk) ? chunk : undefined;
 }
 
 export async function chunksByStatus(status: Chunk['status']): Promise<Chunk[]> {
-  return (await db()).getAllFromIndex('chunks', 'by-status', status);
+  return (await db()).getAllFromIndex('chunks', 'by-status', status).then((rows) => rows.filter(inActiveSession));
 }
 
 export async function chunksBySource(sourceId: SourceId): Promise<Chunk[]> {
-  return (await db()).getAllFromIndex('chunks', 'by-source', sourceId);
+  return (await db()).getAllFromIndex('chunks', 'by-source', sourceId).then((rows) => rows.filter(inActiveSession));
 }
 
 export async function allChunks(): Promise<Chunk[]> {
-  return (await db()).getAll('chunks');
+  return (await db()).getAll('chunks').then((rows) => rows.filter(inActiveSession));
 }
 
 export async function countByStatus(): Promise<Record<Chunk['status'], number>> {
   const database = await db();
   const tx = database.transaction('chunks');
-  const index = tx.store.index('by-status');
-  const [pending, approved, rejected] = await Promise.all([
-    index.count('pending'),
-    index.count('approved'),
-    index.count('rejected'),
-  ]);
+  const rows = await tx.store.getAll();
+  const [pending, approved, rejected] = [
+    rows.filter((row) => inActiveSession(row) && row.status === 'pending').length,
+    rows.filter((row) => inActiveSession(row) && row.status === 'approved').length,
+    rows.filter((row) => inActiveSession(row) && row.status === 'rejected').length,
+  ];
   await tx.done;
   return { pending, approved, rejected };
 }
@@ -229,7 +249,7 @@ export async function decideChunks(
   const changed: ChunkId[] = [];
   for (const id of ids) {
     const chunk = await tx.store.get(id);
-    if (!chunk) continue;
+    if (!chunk || !inActiveSession(chunk)) continue;
     /*
      * Which transitions are allowed, and why these:
      *
@@ -286,7 +306,7 @@ export async function revisePendingChunk(
   const chunk = await database.get('chunks', id);
   // Rejected passages stay put: their text is what future screening matches
   // against, so editing one would quietly change what gets flagged later.
-  if (!chunk || chunk.status === 'rejected') return undefined;
+  if (!chunk || !inActiveSession(chunk) || chunk.status === 'rejected') return undefined;
 
   /*
    * Editing an approved passage returns it to the queue.
@@ -327,7 +347,7 @@ export async function annotateConflict(
 ): Promise<Chunk | undefined> {
   const database = await db();
   const chunk = await database.get('chunks', chunkId);
-  if (!chunk) return undefined;
+  if (!chunk || !inActiveSession(chunk)) return undefined;
   const conflicts = chunk.conflicts.map((c) =>
     c.againstChunkId === againstChunkId ? { ...c, agentVerdict: verdict } : c,
   );
@@ -350,18 +370,22 @@ export async function wipeAll(): Promise<void> {
   // Each tombstone carries the session its row was in. A sync only touches one
   // session, so tombstones with no session would propagate the wipe to the
   // private corpus alone and leave every shared passage standing.
-  for (const row of await tx.objectStore('sources').getAll()) {
+  for (const row of (await tx.objectStore('sources').getAll()).filter(inActiveSession)) {
     await tx
       .objectStore('deletions')
       .put({ id: row.id, kind: 'source', at, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
   }
-  for (const row of await tx.objectStore('chunks').getAll()) {
+  for (const row of (await tx.objectStore('chunks').getAll()).filter(inActiveSession)) {
     await tx
       .objectStore('deletions')
       .put({ id: row.id, kind: 'chunk', at, ...(row.sessionId ? { sessionId: row.sessionId } : {}) });
   }
-  await tx.objectStore('sources').clear();
-  await tx.objectStore('chunks').clear();
+  for (const row of (await tx.objectStore('sources').getAll()).filter(inActiveSession)) {
+    await tx.objectStore('sources').delete(row.id);
+  }
+  for (const row of (await tx.objectStore('chunks').getAll()).filter(inActiveSession)) {
+    await tx.objectStore('chunks').delete(row.id);
+  }
   await tx.done;
   emitCorpusChange();
 }

@@ -11,6 +11,7 @@ import {
 } from '@/src/rag/directory';
 import { createLocalSession, PERSONAL } from '@/src/rag/sessions';
 import { syncNow } from '@/src/rag/sync';
+import { setActiveSession } from '@/src/rag/store';
 
 /**
  * The web app's half of the session UI: the shared component plus the operations
@@ -126,6 +127,7 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
         }
 
         const next = { ...account!, sessionId: target?.id ?? PERSONAL, host };
+        setActiveSession(next.sessionId);
         save(next);
 
         /*

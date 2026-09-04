@@ -22,10 +22,11 @@ export default function StatsBar() {
   ] as const;
 
   return (
-    <div style={{ display: 'flex', gap: 18, fontSize: 12.5 }}>
+    <div className="stats-strip">
       {items.map(([label, n]) => (
-        <span key={label} style={{ color: 'var(--muted)' }}>
-          <strong style={{ color: 'var(--fg)' }}>{n}</strong> {label}
+        <span key={label} className="stat-item">
+          <strong className="stat-value">{n}</strong>
+          <span className="stat-label">{label}</span>
         </span>
       ))}
     </div>

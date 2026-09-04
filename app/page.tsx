@@ -18,25 +18,25 @@ import WarmupBar from '@/components/WarmupBar';
 export default function Home() {
   return (
     <Shell>
-    <main style={{ maxWidth: 920, margin: '0 auto', padding: '40px 24px 80px' }}>
-      <header style={{ marginBottom: 22 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: 22, letterSpacing: -0.2 }}>Autorag</h1>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+    <main className="app-main">
+      <header className="app-header">
+        <div className="brand-row">
+          <div>
+            <div className="brand-mark">
+              <span className="brand-symbol" aria-hidden="true">A</span>
+              <div>
+                <h1 className="brand-name">Autorag</h1>
+                <p className="brand-kicker">Your reading memory</p>
+              </div>
+            </div>
+          </div>
+          <div className="header-tools">
             <AccountBar />
             <ToolRegistrar />
             <WarmupBar />
           </div>
         </div>
-        <p style={{ color: 'var(--muted)', margin: '6px 0 12px', fontSize: 13 }}>
+        <p className="header-copy">
           A browser-native, agent-curated retrieval memory. An agent browses and deposits what
           it finds; you decide what the memory keeps. No server, no API key, nothing leaves this
           device.

@@ -167,31 +167,41 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
   }
 
   return (
-    <main style={{ maxWidth: 460, margin: '0 auto', padding: '64px 24px' }}>
-      <h1 style={{ margin: 0, fontSize: 22, letterSpacing: -0.2 }}>Autorag</h1>
-      <p style={{ color: 'var(--muted)', margin: '6px 0 20px', fontSize: 13 }}>
+    <main className="auth-main">
+      <div className="brand-mark">
+        <span className="brand-symbol" aria-hidden="true">A</span>
+        <p className="brand-kicker" style={{ margin: 0 }}>Your reading memory</p>
+      </div>
+      <div className="auth-intro">
+        <h1>Keep what matters.</h1>
+        <p>
         A curated memory that lives in your browser. Keep things while you read, decide what
         stays, and get answers that cite the page each claim came from.
-      </p>
+        </p>
+      </div>
 
       <Panel title={mode === 'in' ? 'Sign in' : 'Create an account'}>
-        <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--muted)' }}>
+        <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--muted)' }}>
           An email and a password. You do <strong>not</strong> need a Supabase project — that
           is only for hosting a corpus of your own, and you can add it later.
         </p>
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div className="auth-form">
+          <label className="auth-label" htmlFor="auth-email">Email</label>
           <input
+            id="auth-email"
             placeholder="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={field}
+            className="auth-field"
           />
+          <label className="auth-label" htmlFor="auth-password">Password</label>
           <input
+            id="auth-password"
             type="password"
             placeholder="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={field}
+            className="auth-field"
           />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Button
@@ -212,7 +222,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
         </div>
       </Panel>
 
-      <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
+      <div className="auth-options">
         <Panel
           title="Just looking?"
           right={

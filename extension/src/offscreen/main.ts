@@ -24,6 +24,7 @@ import {
   getChunk,
   getSource,
   setSourceStale,
+  setActiveSession,
   wipeAll,
 } from '@/src/rag/store';
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
@@ -89,6 +90,7 @@ function hostOf(url: string): string {
 }
 
 async function handle(request: Request): Promise<unknown> {
+  setActiveSession((await cloudSettings())?.sessionId);
   switch (request.kind) {
     case 'warmup': {
       const s = warmupState();
