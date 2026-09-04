@@ -37,6 +37,19 @@ export interface Account {
   demo?: boolean;
   guest?: boolean;
   directory?: { accessToken: string; refreshToken: string; userId: string };
+  /**
+   * The Supabase project this person hosts their own corpus in, if they have one.
+   *
+   * Absent for most people, and that is the normal case: you need a project to
+   * *host* a corpus, never to sign in and never to join someone else's session.
+   */
+  project?: {
+    url: string;
+    anonKey: string;
+    accessToken: string;
+    refreshToken: string;
+    userId: string;
+  };
   sessionId?: string;
   host?: { url: string; anonKey: string; name: string };
 }

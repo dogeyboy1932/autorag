@@ -2,7 +2,10 @@
 
 import ActivityLog from '@/components/ActivityLog';
 import CorpusView from '@/components/CorpusView';
+import AccountBar from '@/components/AccountBar';
+import AttachProject from '@/components/AttachProject';
 import Shell from '@/components/Shell';
+import WebSessions from '@/components/WebSessions';
 import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
 import IngestForm from '@/components/IngestForm';
@@ -28,6 +31,7 @@ export default function Home() {
         >
           <h1 style={{ margin: 0, fontSize: 22, letterSpacing: -0.2 }}>Autorag</h1>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <AccountBar />
             <ToolRegistrar />
             <WarmupBar />
           </div>
@@ -44,6 +48,8 @@ export default function Home() {
         {/* First, because until today the zip was served and nothing linked to it:
             someone landing here had no route to the half of the product that runs
             on the pages they actually read. */}
+        <WebSessions />
+        <AttachProject />
         <GetExtension />
         <IngestForm />
         <ReviewQueue />

@@ -1,0 +1,176 @@
+'use client';
+
+import { useState } from 'react';
+import { Button, Panel } from '@/components/ui';
+import { useAccount } from '@/components/Shell';
+import { publishProfile } from '@/src/rag/directory';
+import { SCHEMA_SQL, signIn, signUp } from '@/src/rag/sync';
+
+/**
+ * Attach your own Supabase project, so a corpus of yours can live somewhere and be
+ * shared.
+ *
+ * Optional, and separate from signing in. An account is an email and a password;
+ * this is hosting. Most people never need it — you can keep, review, search, ask
+ * and join other people's sessions without one.
+ *
+ * The password here is its own. It authenticates to a different database than the
+ * account does, and tying them together means changing one silently breaks the
+ * other.
+ */
+export default function AttachProject() {
+  const [account, save] = useAccount();
+  const [url, setUrl] = useState('');
+  const [anonKey, setAnonKey] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [showSql, setShowSql] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  if (!account?.directory) return null;
+
+  if (account.project) {
+    return (
+      <Panel
+        title="Your project"
+        right={
+          <Button
+            tone="danger"
+            onClick={() => save({ ...account, project: undefined })}
+          >
+            Detach
+          </Button>
+        }
+      >
+        <p style={note}>
+          Hosting your corpus at <code>{new URL(account.project.url).host}</code>. Sessions you
+          create live here.
+        </p>
+      </Panel>
+    );
+  }
+
+  async function attach(create: boolean) {
+    setBusy(create ? 'Creating…' : 'Connecting…');
+    setMsg(null);
+    try {
+      const cfg = { url: url.trim(), anonKey: anonKey.trim() };
+      const email = account!.email;
+      const project = create
+        ? await signUp(cfg, email, password)
+        : await signIn(cfg, email, password);
+
+      const dir = account!.directory!;
+      /*
+       * Published here rather than at sign-in, because this is the first moment
+       * there is anything true to say. Without a profile row, a session this
+       * person hosts resolves to nothing for everyone they hand the code to — and
+       * they would have no way to see that from their own side.
+       */
+      await publishProfile(
+        { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email, userId: dir.userId },
+        { userId: dir.userId, email, cloud: cfg },
+      );
+
+      save({
+        ...account!,
+        project: {
+          ...cfg,
+          accessToken: project.accessToken,
+          refreshToken: project.refreshToken,
+          userId: project.userId,
+        },
+      });
+      setMsg(null);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Panel title="Host your own memory (optional)">
+      <p style={note}>
+        Only needed to <strong>create</strong> a session or sync across devices. Joining someone
+        else&rsquo;s session needs nothing. Your passages stay in a database you own.
+      </p>
+
+      {showSql && (
+        <>
+          <p style={note}>
+            <strong>1.</strong> In Supabase → SQL editor, run the script below.{' '}
+            <strong>2.</strong> Authentication → Sign In / Providers → Email → turn off{' '}
+            <strong>Confirm email</strong>. <strong>3.</strong> Use <em>Create</em> below with a
+            password for the project — it does not have to match your account password.
+          </p>
+          <textarea
+            readOnly
+            value={SCHEMA_SQL}
+            style={{ ...field, height: 120, fontFamily: 'monospace', fontSize: 11, width: '100%' }}
+          />
+          <div style={row}>
+            <Button
+              onClick={() => {
+                void navigator.clipboard.writeText(SCHEMA_SQL).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+            >
+              {copied ? 'Copied' : 'Copy SQL'}
+            </Button>
+            <button onClick={() => setShowSql(false)} style={linky}>
+              hide
+            </button>
+          </div>
+        </>
+      )}
+
+      <div style={row}>
+        <input placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} style={field} />
+      </div>
+      <div style={row}>
+        <input placeholder="publishable key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} style={field} />
+      </div>
+      <div style={row}>
+        <input
+          type="password"
+          placeholder="project password (its own)"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={field}
+        />
+      </div>
+      <div style={row}>
+        <Button tone="primary" disabled={busy !== null || !url.trim() || !anonKey.trim() || !password} onClick={() => void attach(true)}>
+          {busy === 'Creating…' ? '…' : 'Create'}
+        </Button>
+        <Button disabled={busy !== null || !url.trim() || !anonKey.trim() || !password} onClick={() => void attach(false)}>
+          {busy === 'Connecting…' ? '…' : 'Connect'}
+        </Button>
+      </div>
+      {msg && <p style={{ ...note, color: 'var(--bad)' }}>{msg}</p>}
+    </Panel>
+  );
+}
+
+const row: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 };
+const field: React.CSSProperties = {
+  flex: 1,
+  padding: '6px 8px',
+  borderRadius: 6,
+  border: '1px solid var(--border)',
+  background: 'transparent',
+  color: 'var(--fg)',
+  fontSize: 13,
+};
+const linky: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: 'var(--accent)',
+  fontSize: 12,
+  cursor: 'pointer',
+};
+const note: React.CSSProperties = { margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' };
