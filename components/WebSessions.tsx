@@ -161,9 +161,12 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
          * unless the caller already looked it up (the join path).
          */
         let host = target?.host;
+        if (!target) host = undefined;
         if (target && !host && session) {
           const resolved = await resolveSession(target.id, session);
-          if (resolved && resolved.projectUrl.replace(/\/$/, '') !== project?.url.replace(/\/$/, '')) {
+          const ownProject = project?.url.replace(/\/$/, '').toLowerCase();
+          const resolvedProject = resolved?.projectUrl.replace(/\/$/, '').toLowerCase();
+          if (resolved && resolvedProject !== ownProject) {
             host = { url: resolved.projectUrl, anonKey: resolved.anonKey, name: target.id };
           }
         }
