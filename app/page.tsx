@@ -1,6 +1,7 @@
 'use client';
 
 import ActivityLog from '@/components/ActivityLog';
+import AskPanel from '@/components/AskPanel';
 import CorpusView from '@/components/CorpusView';
 import AccountBar from '@/components/AccountBar';
 import AttachProject from '@/components/AttachProject';
@@ -54,6 +55,7 @@ export default function Home() {
         <IngestForm />
         <ReviewQueue />
         <SearchPanel />
+        <AskPanel />
         <CorpusView sync={<WebSyncButton />} />
         <ActivityLog />
         <DeclarativeIngestForm />
