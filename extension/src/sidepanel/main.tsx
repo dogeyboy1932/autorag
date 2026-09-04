@@ -1393,7 +1393,7 @@ function Recall({ settings }: { settings: AskSettings }) {
     if (!res.ok) return setErr(res.error);
     setThread((prev) => [...prev, { question, result: res.data }]);
     setQ('');
-    setSourcesOpen(false);
+    setSourcesOpen(true);
     if (res.data.tokens) {
       setSpend((prev) => ({
         input: prev.input + res.data.tokens!.input,
