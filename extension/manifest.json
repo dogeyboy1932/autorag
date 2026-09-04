@@ -14,6 +14,12 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://autorag-web.netlify.app/*",
+      "http://localhost:3111/*"
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

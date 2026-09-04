@@ -311,3 +311,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   })();
   return true;
 });
+
+/**
+ * The web app, talking to the extension.
+ *
+ * `externally_connectable` in the manifest names the two origins allowed to reach
+ * this — the deployed site and localhost during development — and Chrome refuses
+ * every other sender before this listener runs. That allowlist is the whole of the
+ * security boundary here, which is why it names exact origins rather than a
+ * pattern that could match a subdomain someone else controls.
+ *
+ * What it enables: the site can tell whether the extension is installed, and can
+ * work on the same corpus instead of its own. Without it the two surfaces are
+ * strangers holding separate IndexedDBs, and someone who installs the extension
+ * after using the site watches their passages apparently vanish.
+ *
+ * `ping` is answered separately and deliberately cheaply. Detection is the common
+ * case — every page load asks — and it must not wake the offscreen document, which
+ * would mean loading a 90MB embedding model to answer "are you there".
+ */
+chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'autorag:ping') {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return true;
+  }
+  if (!isEnvelope(message) || message.to !== 'worker') return;
+
+  (async () => {
+    await ensureOffscreen();
+    sendResponse(await chrome.runtime.sendMessage(envelope('offscreen', message.request)));
+  })();
+  return true;
+});
