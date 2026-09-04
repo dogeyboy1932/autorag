@@ -32,9 +32,15 @@ the extension↔site bridge, RLS on both projects, and the corpus migration.
       `shared: true` in your corpus project, and demo mode hands that project's key
       to the public — so anyone clicking Demo mode can read them. Personal
       (`session_id = 'personal'`) is never shared and is the safe place.
-- [ ] **Turn off Confirm email** in the corpus project (Authentication → Sign In /
-      Providers → Email). It is on, so anyone following the panel's setup steps
-      fails at Create account with an email rate-limit error.
+- [ ] **Turn off Confirm email in BOTH Supabase projects** (Authentication → Sign
+      In / Providers → Email → Confirm email).
+      - **Directory** (`qkupjhuroorzijbfqdtv`) — this blocks *creating an account
+        at all*: signup tries to mail a confirmation link, the free tier refuses
+        after a couple of addresses, and you get `email rate limit exceeded`.
+      - **Corpus** (`rylggyqpotiyshvsvtpz`) — this blocks *attaching a project*
+        with Create, the same way.
+      There is nowhere for a confirmation link to land anyway: it points at a Site
+      URL nothing serves.
 - [ ] **Set a spend limit** on the Anthropic key. The ten-answer cap is keyed on a
       hash of the request address and a VPN defeats it.
 

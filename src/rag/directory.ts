@@ -137,24 +137,45 @@ export async function signInOrUp(email: string, password: string): Promise<Sessi
       user?: { id?: string };
       msg?: string;
       message?: string;
+      error_description?: string;
     };
-    return { ok: res.ok, body };
+    return { ok: res.ok, status: res.status, body };
   };
 
-  let r = await attempt('token?grant_type=password');
+  const signInAttempt = await attempt('token?grant_type=password');
+  let r = signInAttempt;
   if (!r.ok || !r.body.access_token) r = await attempt('signup');
   if (!r.body.access_token) {
-    const detail = r.body.msg ?? r.body.message ?? 'could not sign in';
     /*
-     * A directory with "Confirm email" left on returns a user and no session, and
-     * the link it mails points at a Site URL nothing serves. Reported as the
-     * setting it is rather than as a login failure.
+     * Three quite different failures used to arrive as "could not sign in", which
+     * sends whoever reads it to retype a password. Each is named for what it is,
+     * because only one of them is about the password.
+     *
+     * The first two are the same underlying cause: **Confirm email is on**. With it
+     * enabled, signup either returns a user and no session, or — on the free tier,
+     * once a couple of addresses have been tried — refuses with a mail rate limit.
+     * Neither mentions the setting, and the confirmation link it wants to send
+     * points at a Site URL that nothing serves anyway.
      */
-    throw new Error(
-      /confirm/i.test(detail)
-        ? 'The directory project requires email confirmation. Turn off Confirm email in its Authentication → Sign In / Providers → Email settings.'
-        : `Directory sign-in failed: ${detail}`,
-    );
+    const detail = r.body.msg ?? r.body.message ?? r.body.error_description ?? '';
+    const confirmEmailIsOn =
+      /rate limit/i.test(detail) || /confirm/i.test(detail) || Boolean(r.body.user);
+
+    if (confirmEmailIsOn) {
+      throw new Error(
+        'The directory project has "Confirm email" turned on, so it tries to email a ' +
+          'confirmation link that nothing here can receive. Turn it off: Supabase → ' +
+          'Authentication → Sign In / Providers → Email → Confirm email.' +
+          (/rate limit/i.test(detail) ? ' (It is currently refusing with a mail rate limit.)' : ''),
+      );
+    }
+    if (/invalid login credentials/i.test(detail)) {
+      throw new Error(
+        'That email and password did not match an account, and creating one was refused. ' +
+          'Check the password, or use a different email to make a new account.',
+      );
+    }
+    throw new Error(`Directory sign-in failed: ${detail || `HTTP ${r.status}`}`);
   }
   return {
     accessToken: r.body.access_token,
