@@ -20,3 +20,9 @@ extension/dist/
 # against. Committing a 20MB binary would mean re-committing it on every
 # extension change, and shipping a stale one the first time someone forgot.
 public/autorag-extension.zip
+
+# Working notes kept at the root — build plan, manual, handoff, amendments.
+# They were written for whoever is building this, not for whoever reads the
+# repo, and they stay on disk for that person. README and LICENSE are what a
+# reader needs.
+archive/
