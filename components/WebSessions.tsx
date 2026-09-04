@@ -12,7 +12,7 @@ import {
 import { createLocalSession, PERSONAL } from '@/src/rag/sessions';
 import { syncNow } from '@/src/rag/sync';
 import { setActiveSession } from '@/src/rag/store';
-import { onCorpusChange } from '@/src/rag/bus';
+import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
 import { Button } from '@/components/ui';
 
 /**
@@ -210,9 +210,14 @@ export function WebSyncButton() {
   async function sync() {
     const host = account?.host;
     const project = account?.project;
+    const sessionId = account?.sessionId ?? PERSONAL;
+    if (host && !account?.sessionId) {
+      setMessage('The joined session is missing its session ID. Rejoin it before syncing.');
+      return;
+    }
     const cloud = host
-      ? { url: host.url, anonKey: host.anonKey, sessionId: account?.sessionId }
-      : project && { url: project.url, anonKey: project.anonKey, sessionId: account?.sessionId };
+      ? { url: host.url, anonKey: host.anonKey, sessionId }
+      : project && { url: project.url, anonKey: project.anonKey, sessionId };
     if (!cloud) {
       setMessage('Attach a project or join a session before syncing.');
       return;
@@ -230,6 +235,7 @@ export function WebSyncButton() {
             userId: project!.userId,
           };
       const result = await syncNow(cloud, auth);
+          emitCorpusChange();
       setMessage(`Synced ${result.pulled} passage(s) from other devices.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
@@ -240,10 +246,20 @@ export function WebSyncButton() {
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      <span
+        style={{
+          display: 'inline-block',
+          width: 190,
+          color: 'var(--muted)',
+          fontSize: 12,
+          textAlign: 'right',
+        }}
+      >
+        {message ?? ''}
+      </span>
       <Button tone="primary" disabled={busy} onClick={() => void sync()}>
         {busy ? 'Syncing…' : 'Sync now'}
       </Button>
-      {message && <span style={{ color: 'var(--muted)', fontSize: 12 }}>{message}</span>}
     </span>
   );
 }
