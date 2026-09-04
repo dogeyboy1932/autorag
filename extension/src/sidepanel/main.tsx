@@ -1758,16 +1758,9 @@ function PanelSessions({
          * the same question about credentials — and it is skipped when the caller
          * has already done it.
          */
-        let host = target?.host;
-        if (target && !host) {
-          const resolved = await askDetailed<{
-            code: string;
-            host: { url: string; anonKey: string; name: string };
-          }>({ kind: 'joinSession', cloud, code: target.id });
-          if (resolved.ok && resolved.data.host.url.replace(/\/$/, '') !== cloud.url.replace(/\/$/, '')) {
-            host = resolved.data.host;
-          }
-        }
+        // The normal session list is owner-filtered, so listed sessions are local.
+        // Only join-by-code supplies an external host.
+        const host = target?.host;
 
         const next: CloudSettings = { ...cloud, sessionId: target?.id, host };
         save(next);

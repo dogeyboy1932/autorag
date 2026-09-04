@@ -160,16 +160,10 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
          * directory is the only thing that knows the difference, so it is asked,
          * unless the caller already looked it up (the join path).
          */
+        // The normal session list is owner-filtered, so a listed session always
+        // belongs to this account. Only join-by-code supplies an external host.
         let host = target?.host;
         if (!target) host = undefined;
-        if (target && !host && session) {
-          const resolved = await resolveSession(target.id, session);
-          const ownProject = project?.url.replace(/\/$/, '').toLowerCase();
-          const resolvedProject = resolved?.projectUrl.replace(/\/$/, '').toLowerCase();
-          if (resolved && resolvedProject !== ownProject) {
-            host = { url: resolved.projectUrl, anonKey: resolved.anonKey, name: target.id };
-          }
-        }
 
         const next = { ...account!, sessionId: target?.id ?? PERSONAL, host };
         setActiveSession(next.sessionId);
