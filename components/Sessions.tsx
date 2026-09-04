@@ -150,7 +150,21 @@ export default function Sessions({
             onClick={() => void go({ id: x.code }, x.name)}
           >
             <span className="session-name">{x.name}</span>
-            <code className="note">{x.code}</code>
+            {/*
+              The code is the one thing on this row you need to get *out* of the
+              app — read aloud, pasted into a message. It sits inside a button,
+              and a button's text is not selectable, so it could only be
+              retyped from the screen. `stopPropagation` keeps a click that lands
+              on it from switching sessions underneath the selection.
+            */}
+            <code
+              className="pickable"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              title="Select to copy"
+            >
+              {x.code}
+            </code>
             <span className="session-cta">{active === x.code ? 'current' : 'switch'}</span>
           </button>
         ))}

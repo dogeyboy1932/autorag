@@ -447,19 +447,62 @@ interface Source {
  * searchable but rank lower and come back flagged, so the record of what you once
  * believed survives. Forgetting is permanent and asks twice.
  */
+/**
+ * Sync, wherever you just changed something.
+ *
+ * ## Why this is a component and why it is never conditional
+ *
+ * Keeping a passage and getting it off this device are one action to the person
+ * doing them, so the control that completes it has to be within reach of the place
+ * they did the first half — the review queue and the corpus list both.
+ *
+ * Every gate this button has ever carried removed it in precisely the state that
+ * needed it: hidden when there were no sources, so a corpus that had never been
+ * pushed could not be; hidden inside a collapsed section, so a session you had
+ * just switched into looked empty with no way to fill it; hidden without
+ * credentials, so a project the extension had not been told about was
+ * indistinguishable from no project at all. It renders always. When there is
+ * nowhere to send anything, pressing it says so — a sentence is the right answer
+ * to that, not an absence.
+ */
+function SyncNow({ cloud, onDone }: { cloud: CloudSettings; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setMsg(null);
+    /*
+     * `askDetailed`, not `ask`. The latter swallows a failure and returns null, so
+     * a sync that refused looked exactly like a sync that worked — the failure
+     * this whole project keeps re-learning.
+     */
+    const res = await askDetailed<{ pushed: number; pulled: number; deleted: number }>({
+      kind: 'sync',
+      cloud,
+    });
+    setBusy(false);
+    setMsg(res.ok ? `Synced — ${res.data.pushed} up, ${res.data.pulled} down.` : res.error);
+    onDone();
+  }
+
+  return (
+    <span className="sync-slot">
+      <button className="primary" onClick={() => void run()} disabled={busy}>
+        {busy ? 'Syncing…' : 'Sync now'}
+      </button>
+      {msg && <span className="note sync-msg">{msg}</span>}
+    </span>
+  );
+}
+
 function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: number; cloud: CloudSettings }) {
   const [sources, setSources] = useState<Source[]>([]);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  /*
-   * There is somewhere to sync to if you host a corpus *or* you have joined
-   * someone else's session. A joiner has no project of their own and their whole
-   * relationship with a corpus is pulling it down and pushing changes back, so
-   * gating on the project alone hid this from exactly the people who need it.
-   */
-  const canSync = Boolean(cloud.accessToken || cloud.host);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setSources((await ask<Source[]>({ kind: 'listSources' })) ?? []);
@@ -479,14 +522,6 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
     onChange();
   }
 
-  async function sync() {
-    setSyncing(true);
-    await ask({ kind: 'sync', cloud });
-    setSyncing(false);
-    await refresh();
-    onChange();
-  }
-
   return (
     <section>
       <h2 className="corpus-head">
@@ -497,20 +532,18 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
           <span className="soft">{count ?? '…'}</span>
         </button>
         {/*
-          Sync lives in the heading, not inside the list.
+          Sync is unconditional. No gate on having sources, on the section being
+          open, on holding credentials.
 
-          It used to sit under `sources.length > 0`, inside a section collapsed by
-          default — so it disappeared in the one situation that needs it most: you
-          have just switched to a session, nothing has been pulled yet, and the
-          corpus is empty. No button because there are no sources, and no sources
-          until you press the button. Here it is visible in Library whenever there
-          is somewhere to sync to.
+          Every gate this button has had removed it in the exact state that needed
+          it: an empty session you just switched into, a corpus that has never been
+          pushed, a project the extension had not been told about. Keeping
+          something and syncing it are one action in the head of the person doing
+          it, so the button that completes it is always on screen. When there is
+          nowhere to send it, pressing it says so — that is a message, not a
+          reason to disappear.
         */}
-        {canSync && (
-          <button className="primary" onClick={() => void sync()} disabled={syncing}>
-            {syncing ? 'Syncing…' : 'Sync now'}
-          </button>
-        )}
+        <SyncNow cloud={cloud} onDone={() => { void refresh(); onChange(); }} />
       </h2>
 
       {open && (
@@ -569,19 +602,28 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
             ))
           )}
 
-          {sources.length > 0 && (
-            <div className="row" style={{ marginTop: 4 }}>
-              {confirming === '__all__' ? (
-                <button className="danger" onClick={() => act({ kind: 'wipe' })}>
-                  Really erase everything?
-                </button>
-              ) : (
-                <button className="danger" onClick={() => setConfirming('__all__')}>
-                  Erase the whole corpus
-                </button>
-              )}
-            </div>
-          )}
+          {/*
+            Sync sits beside Erase, where it has always been, and is no longer
+            behind `sources.length > 0`: a corpus that has never been pushed has
+            nothing to show and is exactly the one that needs pushing. Erase keeps
+            that condition, because there is genuinely nothing to erase.
+          */}
+          <div className="row" style={{ marginTop: 4 }}>
+            <SyncNow cloud={cloud} onDone={() => { void refresh(); onChange(); }} />
+            {sources.length > 0 && (
+              <>
+                {confirming === '__all__' ? (
+                  <button className="danger" onClick={() => act({ kind: 'wipe' })}>
+                    Really erase everything?
+                  </button>
+                ) : (
+                  <button className="danger" onClick={() => setConfirming('__all__')}>
+                    Erase the whole corpus
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </section>
@@ -995,14 +1037,6 @@ function Memory({
   const [copied, setCopied] = useState(false);
 
   const signedIn = Boolean(cloud.accessToken);
-  /*
-   * There is something to sync if you host a corpus *or* you have joined someone
-   * else's session. The button used to hang off `signedIn` alone, which is true
-   * only for a person with their own project attached — so it was hidden from
-   * exactly the people who most need it: a joiner, whose whole relationship with a
-   * corpus is pulling it down and pushing changes back.
-   */
-  const canSync = Boolean(cloud.accessToken || cloud.host);
 
   async function connect(create: boolean) {
     setBusy(create ? 'creating' : 'signing in');
@@ -1173,16 +1207,14 @@ function Memory({
               )}
             </>
           )}
-          {canSync && (
+          {signedIn && (
             <div className="row">
-              {signedIn && (
-                <button
-                  className="danger"
-                  onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey, directory: cloud.directory, email: cloud.email })}
-                >
-                  Detach project
-                </button>
-              )}
+              <button
+                className="danger"
+                onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey, directory: cloud.directory, email: cloud.email })}
+              >
+                Detach project
+              </button>
             </div>
           )}
           {msg && <p className="note">{msg}</p>}
@@ -1813,16 +1845,27 @@ function PanelSessions({
           });
         }
         /*
-         * Switching always reconciles — that is the point of switching — but only
-         * when there is somewhere to reconcile with.
+         * Switching always reconciles — that is the point of switching — but what
+         * silence means depends entirely on which session you moved to.
          *
-         * Without a project and without a host there is no cloud copy of anything,
-         * so `sync` would refuse with "No corpus to sync. Attach your own Supabase
-         * project…" and the switch would report a failure. Moving into your own
-         * personal corpus with nothing attached is not a failure: the passages are
-         * already here, and there is nothing to fetch. Say nothing and show them.
+         * Personal with nothing attached: quiet. The passages are already on this
+         * device and there is nothing anywhere to fetch. Reporting "no corpus to
+         * sync" there would be an error message about a working state.
+         *
+         * A *named* session with nothing attached: say so, loudly. That corpus
+         * lives in a database, and with no credentials to reach it the panel can
+         * only show an empty session — which looks exactly like a session that is
+         * empty. This codebase has now produced that same indistinguishable pair
+         * three times, and the cure is never to let it be silent.
          */
-        if (!next.accessToken && !next.host) return { pulled: 0 };
+        if (!next.accessToken && !next.host) {
+          if (target?.id) {
+            throw new Error(
+              `${target.id} lives in a Supabase project and this browser has no credentials for it, so there is nothing to show. Open the web app while signed in — that hands the extension your project — or attach one under Project setup.`,
+            );
+          }
+          return { pulled: 0 };
+        }
         const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
         if (!res.ok) throw new Error(res.error);
         return { pulled: res.data.pulled };
@@ -1979,8 +2022,17 @@ function App() {
           <CurrentTab onCaptured={refresh} />
           <hr />
           <section>
-            <h2>
-              Waiting for you {pending.length > 0 && <span className="pill">{pending.length}</span>}
+            {/*
+              Sync here too. Keeping a passage and getting it off this device are
+              one action to the person doing them, and the review queue is where
+              the first half happens — so the control that finishes it is beside
+              the buttons that started it, not a scroll away.
+            */}
+            <h2 className="corpus-head">
+              <span>
+                Waiting for you {pending.length > 0 && <span className="pill">{pending.length}</span>}
+              </span>
+              <SyncNow cloud={cloud} onDone={refresh} />
             </h2>
             {pending.length === 0 ? (
               <p className="empty">All clear. Highlight anything on any page to keep it.</p>

@@ -408,3 +408,21 @@ ul.sessions code {
    else's project and is readable by everyone in it. */
 .session-chip { color: var(--accent-strong); font-weight: 600; }
 .session-chip.shared { color: var(--warn); }
+
+/*
+ * Text you may need to copy out, inside a control that would otherwise swallow
+ * the selection. A session code is read aloud and pasted into messages; a code
+ * that can only be retyped from the screen is not shareable, which is the only
+ * thing it is for.
+ */
+.pickable {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+
+/* The sync control and whatever it last reported, wherever it appears. */
+.sync-slot { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.sync-msg { font-size: 11.5px; }

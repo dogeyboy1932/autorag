@@ -104,7 +104,7 @@ function App() {
 
       <div className={tab === 'library' ? 'pane wide' : 'pane wide off'}>
         <IngestForm />
-        <ReviewQueue />
+        <ReviewQueue sync={<WebSyncButton />} />
         <CorpusView sync={<WebSyncButton />} />
       </div>
 

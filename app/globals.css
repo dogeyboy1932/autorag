@@ -410,3 +410,17 @@ textarea.field { resize: vertical; line-height: 1.6; }
 .check input { margin-top: 3px; flex: none; }
 
 hr { border: 0; border-top: 1px solid var(--border); margin: var(--s2) 0; }
+
+/*
+ * Text you may need to copy out, inside a control that would otherwise swallow
+ * the selection. A session code is read aloud and pasted into messages; a code
+ * that can only be retyped from the screen is not shareable, which is the only
+ * thing it is for.
+ */
+.pickable {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+  color: var(--muted);
+  letter-spacing: .06em;
+}

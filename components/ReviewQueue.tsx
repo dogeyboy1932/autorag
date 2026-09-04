@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import type { Chunk, Source } from '@/src/types';
 import { chunksByStatus, allSources, decideChunks } from '@/src/rag/store';
 import { useCorpusData } from '@/src/rag/hooks';
@@ -17,7 +17,7 @@ import { Button, Empty, Field, Panel, Pill } from './ui';
  * not exist in any shipping runtime (lib/webmcp/API-DELTA.md D4). The agent stages,
  * a person decides here, and the agent polls `autorag_list_pending`.
  */
-export default function ReviewQueue() {
+export default function ReviewQueue({ sync }: { sync?: ReactNode }) {
   const load = useCallback(async (): Promise<{ pending: Chunk[]; sources: Source[] }> => {
     const [pending, sources] = await Promise.all([chunksByStatus('pending'), allSources()]);
     return { pending, sources };
@@ -39,16 +39,26 @@ export default function ReviewQueue() {
     <Panel
       title="Waiting for you"
       right={
-        pending.length > 0 ? (
-          <span className="row">
-            <Pill tone="warn">{pending.length} to review</Pill>
-            <Button onClick={() => void approve(pending.map((c) => c.id))} tone="primary" small>
-              Approve all
-            </Button>
-          </span>
-        ) : (
-          <Pill tone="mute">all clear</Pill>
-        )
+        /*
+          Sync sits here as well as on the corpus below. Keeping a passage and
+          getting it off this device are one action to the person doing them, so
+          the control that finishes it is beside the buttons that start it — not a
+          panel away. It is never conditional: a corpus that has never been pushed
+          is exactly the one that needs pushing.
+        */
+        <span className="row">
+          {pending.length > 0 ? (
+            <>
+              <Pill tone="warn">{pending.length} to review</Pill>
+              <Button onClick={() => void approve(pending.map((c) => c.id))} tone="primary" small>
+                Approve all
+              </Button>
+            </>
+          ) : (
+            <Pill tone="mute">all clear</Pill>
+          )}
+          {sync}
+        </span>
       }
     >
       {pending.length === 0 ? (
