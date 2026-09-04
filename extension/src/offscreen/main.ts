@@ -163,11 +163,36 @@ async function handle(request: Request): Promise<unknown> {
      * download reports a percentage.
      */
     case 'sync': {
-      const { url, anonKey, accessToken, refreshToken, email, sessionId } = request.cloud;
-      if (!accessToken || !refreshToken) throw new Error('Not signed in to the cloud memory.');
+      const { url, anonKey, accessToken, refreshToken, email, sessionId, host } = request.cloud;
+      /*
+       * A member of someone else's session has no project and no user of their own
+       * in it. They reach it as the **anon** role, holding the publishable key the
+       * session was shared with — which is exactly what a member is, so this is the
+       * member path rather than a way around sign-in.
+       *
+       * Without this, joining was impossible for the people it was built for: the
+       * check below demanded tokens that only a project owner can have, so a joiner
+       * with no Supabase was told they were "not signed in to the cloud memory"
+       * while being perfectly signed in to their account.
+       */
+      if (!host && (!accessToken || !refreshToken)) {
+        throw new Error(
+          'No corpus to sync. Attach your own Supabase project, or join a session to work in someone else\'s.',
+        );
+      }
       record('working', sessionId ? `Syncing session ${sessionId}` : 'Syncing memory');
       const result = await syncWithRenewal(
-        { url, anonKey, accessToken, refreshToken, email, sessionId },
+        host
+          ? {
+              url,
+              anonKey,
+              host,
+              sessionId,
+              email: email ?? '',
+              accessToken: host.anonKey,
+              refreshToken: '',
+            }
+          : { url, anonKey, accessToken, refreshToken, email, sessionId },
         (message) => record('working', message),
       );
       record(

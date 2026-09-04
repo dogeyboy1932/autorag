@@ -160,7 +160,12 @@ try {
   // ---- A signs up: an account in their own project, and one in the directory --
   users.push({ env: corpus, id: await makeUser(corpus, A_EMAIL) });
   users.push({ env: directory, id: await makeUser(directory, A_EMAIL) });
-  users.push({ env: corpus, id: await makeUser(corpus, B_EMAIL) });
+  /*
+   * B gets a directory account and nothing else. No Supabase project, no user in
+   * A's project — which is the whole point: joining someone's session is supposed
+   * to need an account and nothing more, and for a long time it demanded a project
+   * nobody joining would ever have.
+   */
   users.push({ env: directory, id: await makeUser(directory, B_EMAIL) });
 
   A = await panelIn('autorag-sess-A-');
@@ -212,17 +217,48 @@ try {
   ).json();
   ok(rows.length > 0, "the passage is stored under the session in A's project", JSON.stringify(rows));
 
+  /*
+   * Nothing unreviewed leaves the machine.
+   *
+   * Staged material is a draft nobody has vouched for, sitting next to whatever
+   * screening flagged about it. In a session it would land in front of other
+   * people, indistinguishable from what was actually kept. Retrieval has always
+   * refused pending chunks; this asserts the same rule on the wire.
+   *
+   * Ingested and deliberately NOT approved, so a sync that pushed everything would
+   * fail here rather than passing on an empty corpus.
+   */
+  await send(A.p, {
+    kind: 'ingest',
+    text: 'A draft passage that was never reviewed and must not reach the cloud under any circumstances.',
+    sourceUrl: 'https://example.com/probe-unreviewed',
+    title: 'Probe unreviewed',
+  });
+  const stagedLocally = ((await send(A.p, { kind: 'listPending' })).data ?? []).length;
+  ok(stagedLocally > 0, 'the unreviewed passage really is staged locally', String(stagedLocally));
+
+  await send(A.p, { kind: 'sync', cloud: inSession });
+  const remote = await (
+    await admin(corpus, `rest/v1/chunks?select=status&session_id=eq.${code}`)
+  ).json();
+  ok(
+    // `every` is true of an empty array, so a sync that pushed nothing at all
+    // would pass this vacuously. Require the approved one to have arrived too.
+    Array.isArray(remote) && remote.length > 0 && remote.every((r) => r.status === 'approved'),
+    'no unreviewed passage reaches Supabase, and the approved one still does',
+    JSON.stringify(remote),
+  );
+
   // ---- B signs up and is invited -------------------------------------------
   B = await panelIn('autorag-sess-B-');
-  const bIn = await send(B.p, {
-    kind: 'cloudSignIn',
-    cloud: CLOUD,
-    email: B_EMAIL,
-    password: PASSWORD,
-    create: false,
-  });
-  ok(bIn?.ok && bIn.data?.directory?.userId, 'B signs in and reaches the directory', bIn?.error);
-  const bCloud = { ...CLOUD, ...bIn.data };
+  const bIn = await send(B.p, { kind: 'signIn', email: B_EMAIL, password: PASSWORD });
+  ok(
+    bIn?.ok && bIn.data?.directory?.userId,
+    'B signs in with an email and a password — no Supabase project',
+    bIn?.error,
+  );
+  // Deliberately empty: B hosts nothing.
+  const bCloud = { url: '', anonKey: '', ...bIn.data };
 
   // Before the invite, the code must be useless to B. This is the assertion that
   // decides whether a session is private at all.

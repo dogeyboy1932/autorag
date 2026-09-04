@@ -8,9 +8,10 @@ sense to a person, and whether the shared-corpus flows behave when two real
 browser profiles use them at once.
 
 **Already machine-checked, so don't spend time on it:** session create/invite/join,
-private-session isolation, demo-mode credential release, the ten-answer cap, the
-extension↔site bridge, RLS on both projects, and the corpus migration.
-(`pnpm session:check` 19 · `dir:check` 10 · `ask:check` 10 · `schema:check` 7.)
+**joining with no Supabase project at all**, private-session isolation, demo-mode
+credential release, unreviewed passages never reaching Supabase, the ten-answer cap,
+the extension↔site bridge, RLS on both projects, and the corpus migration.
+(`pnpm session:check` 21 · `dir:check` 10 · `ask:check` 10 · `schema:check` 7.)
 
 ---
 
@@ -19,6 +20,23 @@ extension↔site bridge, RLS on both projects, and the corpus migration.
 1. `pnpm ext` then reload the extension at `brave://extensions` — service worker,
    offscreen and content scripts all changed.
 2. Live site: <https://autorag-web.netlify.app/>
+
+---
+
+## 0b. Things only you can do
+
+- [ ] **Put passages in `public-demo`.** It is published and open, but empty — demo
+      mode currently loads a corpus with nothing in it. Switch to it in Sessions,
+      keep and approve 3-4 passages from real articles, sync.
+- [ ] **Move anything private out of `first` and `5566YNMQ`.** Both are
+      `shared: true` in your corpus project, and demo mode hands that project's key
+      to the public — so anyone clicking Demo mode can read them. Personal
+      (`session_id = 'personal'`) is never shared and is the safe place.
+- [ ] **Turn off Confirm email** in the corpus project (Authentication → Sign In /
+      Providers → Email). It is on, so anyone following the panel's setup steps
+      fails at Create account with an email rate-limit error.
+- [ ] **Set a spend limit** on the Anthropic key. The ten-answer cap is keyed on a
+      hash of the request address and a VPN defeats it.
 
 ---
 
@@ -33,6 +51,24 @@ Panel → **Settings → Sessions**.
 
 **Watch for:** the header naming the wrong session while you keep. If it says
 `personal`, the passages went to your private corpus and the demo will be empty.
+
+---
+
+## 1b. Accounts, guest and demo (new — this is the part to judge)
+
+On the live site in a clean profile:
+
+- [ ] The **login screen** appears. Sign up with an email and a password. It should
+      not ask for Supabase anything.
+- [ ] Sessions panel appears; `public-demo` is listed; the panel explains that
+      *creating* a session needs your own project while joining does not.
+- [ ] Sign out → **Use as guest** → keep and approve something → sign out again.
+      The login screen should now say how many passages are already in this browser
+      and offer to clear them.
+- [ ] **Demo mode** → loads `public-demo` without an account.
+
+**Watch for:** being asked for a Supabase URL or key at any point before you choose
+to host. That was the bug this release exists to fix.
 
 ---
 

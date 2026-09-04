@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Panel } from '@/components/ui';
 import {
   directoryConfigured,
@@ -10,6 +10,7 @@ import {
   signInOrUp,
 } from '@/src/rag/directory';
 import { syncNow } from '@/src/rag/sync';
+import { countByStatus, wipeAll } from '@/src/rag/store';
 import { PERSONAL } from '@/src/rag/sessions';
 
 /**
@@ -65,6 +66,23 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
   const [msg, setMsg] = useState<string | null>(null);
 
   const configured = directoryConfigured();
+
+  /*
+   * Passages already in this browser, kept before anyone signed in.
+   *
+   * They do not need migrating — they live in IndexedDB tagged `personal` and stay
+   * there whoever signs in next, so carrying them over is the default rather than
+   * a feature. What matters is saying so, for two opposite reasons: a guest who
+   * signs up should know their work is not being thrown away, and someone signing
+   * in on a **shared machine** should know they are about to inherit a stranger's
+   * notes, and be given the one button that prevents it.
+   */
+  const [kept, setKept] = useState<number | null>(null);
+  useEffect(() => {
+    void countByStatus()
+      .then((c) => setKept(c.approved + c.pending))
+      .catch(() => setKept(null));
+  }, []);
 
   async function withAccount() {
     setBusy(mode === 'up' ? 'Creating your account…' : 'Signing in…');
@@ -221,6 +239,30 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
           </p>
         </Panel>
       </div>
+
+      {kept !== null && kept > 0 && (
+        <Panel
+          title="Already in this browser"
+          right={
+            <Button
+              tone="danger"
+              disabled={busy !== null}
+              onClick={async () => {
+                await wipeAll();
+                setKept(0);
+              }}
+            >
+              Clear them
+            </Button>
+          }
+        >
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+            {kept} passage{kept === 1 ? '' : 's'} kept here without an account. They stay with
+            whichever account signs in next and sync once a project is attached. If this is not
+            your machine, or they are not yours, clear them first.
+          </p>
+        </Panel>
+      )}
 
       {busy && <p style={note}>{busy}</p>}
       {msg && <p style={{ ...note, color: 'var(--bad)' }}>{msg}</p>}
