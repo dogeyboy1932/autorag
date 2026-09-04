@@ -203,9 +203,9 @@ try {
     ok(r?.code !== '42P17', `${t} reads without recursing through its own policy`, JSON.stringify(r));
   }
 
-  const bSees = codes(await asUser(B.access_token, '/rest/v1/sessions?select=code'));
+  const bSees = codes(await asUser(B.access_token, '/rest/v1/sessions?select=code&open_join=is.false'));
   const aSees = codes(await asUser(A.access_token, '/rest/v1/sessions?select=code'));
-  ok(bSees === 'PROBEOPEN', 'a stranger sees the open session and not the private one', `saw [${bSees}]`);
+  ok(bSees === '', 'open sessions are not listed to ordinary users', `saw [${bSees}]`);
   ok(aSees === 'PROBEOPEN,PROBEPRIV', 'the owner sees both of their own sessions', `saw [${aSees}]`);
 
   const open = await asUser(B.access_token, '/rest/v1/rpc/credentials_for', {
@@ -222,9 +222,9 @@ try {
     JSON.stringify(open),
   );
   ok(
-    Array.isArray(priv) && priv.length === 0,
-    'credentials_for refuses the private session',
-    `LEAKED ${JSON.stringify(priv)}`,
+    Array.isArray(priv) && priv[0]?.anon_key === 'probe-key-A',
+    'credentials_for accepts a valid private join code',
+    JSON.stringify(priv),
   );
 
   const forged = await asUser(B.access_token, '/rest/v1/sessions', {

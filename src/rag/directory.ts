@@ -271,7 +271,7 @@ export async function listOpenSessions(session?: Session): Promise<DirectorySess
 
 /** Every session this person can see: theirs, ones they were invited to, and open ones. */
 export async function listSessions(session: Session): Promise<DirectorySession[]> {
-  const res = await fetch(url('rest/v1/sessions?select=code,name,open_join,owner_user_id'), {
+  const res = await fetch(url('rest/v1/sessions?select=code,name,open_join,owner_user_id&open_join=is.false'), {
     headers: headers(session.accessToken),
   });
   if (!res.ok) await fail(res);

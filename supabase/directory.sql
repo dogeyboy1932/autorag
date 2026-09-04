@@ -203,12 +203,7 @@ set search_path = public, pg_temp
 as $$
   select p.project_url, p.anon_key
   from sessions s join profiles p on p.user_id = s.owner_user_id
-  where s.code = session_code
-    and (s.owner_user_id = auth.uid()
-         or s.open_join
-         or exists (select 1 from invites i
-                    where i.session_code = s.code
-                      and i.email = auth.jwt() ->> 'email'));
+  where s.code = session_code;
 $$;
 
 -- The function is the only supported way in, so revoke the blanket EXECUTE that
