@@ -30,6 +30,25 @@ const KEY = 'autorag.account';
  * makes; the alternative is signing in on every page load.
  */
 
+/**
+ * What the extension is told about the account.
+ *
+ * Written once rather than at each of the two call sites below, because it was
+ * two hand-copied object literals and they drifted: `project` was added to
+ * `Account` and reached neither of them, so the panel held a session id it had no
+ * credentials to reach and reported an empty corpus for a session full of
+ * passages. A field list repeated twice is a field list that will be updated once.
+ */
+const mirrored = (a: Account) => ({
+  email: a.email,
+  demo: a.demo,
+  guest: a.guest,
+  directory: a.directory,
+  project: a.project,
+  sessionId: a.sessionId,
+  host: a.host,
+});
+
 interface AccountContext {
   account: Account | null;
   save: (next: Account | null) => void;
@@ -84,17 +103,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
      * Silent on failure by design — most people have no extension, which is not a
      * fault worth interrupting anyone about.
      */
-    void askExtension({
-      kind: 'setAccount',
-      account: next && {
-        email: next.email,
-        demo: next.demo,
-        guest: next.guest,
-        directory: next.directory,
-        sessionId: next.sessionId,
-        host: next.host,
-      },
-    }).catch(() => {});
+    void askExtension({ kind: 'setAccount', account: next && mirrored(next) }).catch(() => {});
   }, []);
 
   /*
@@ -115,17 +124,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!ready || !account) return;
-    void askExtension({
-      kind: 'setAccount',
-      account: {
-        email: account.email,
-        demo: account.demo,
-        guest: account.guest,
-        directory: account.directory,
-        sessionId: account.sessionId,
-        host: account.host,
-      },
-    }).catch(() => {});
+    void askExtension({ kind: 'setAccount', account: mirrored(account) }).catch(() => {});
   }, [ready, account]);
 
   const value = useMemo(() => ({ account, save, ready }), [account, save, ready]);

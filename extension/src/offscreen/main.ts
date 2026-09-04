@@ -344,9 +344,32 @@ async function handle(request: Request): Promise<unknown> {
     case 'setAccount': {
       const current = (await storage.get<CloudSettings>('cloud')) ?? { url: '', anonKey: '' };
       const a = request.account;
+      /*
+       * A project attached on the web app is a project attached here.
+       *
+       * `CloudSettings` keeps the project's credentials flat — `url`, `anonKey`,
+       * `accessToken`, `refreshToken`, `userId` — because that is what `sync` and
+       * `syncWithRenewal` read. The web app nests them under `project`, so this is
+       * where the two shapes meet.
+       *
+       * Only overwritten when the account actually carries one. Signing in on the
+       * web with no project must not wipe a project attached in the panel: they are
+       * two doors to the same setting, and coming through one should not clear what
+       * the other did.
+       */
+      const project = a?.project;
       await storage.set({
         cloud: {
           ...current,
+          ...(project
+            ? {
+                url: project.url,
+                anonKey: project.anonKey,
+                accessToken: project.accessToken,
+                refreshToken: project.refreshToken,
+                userId: project.userId,
+              }
+            : {}),
           email: a?.email ?? '',
           directory: a?.directory,
           demo: a?.demo,
@@ -355,7 +378,10 @@ async function handle(request: Request): Promise<unknown> {
           host: a?.host,
         },
       });
-      record('done', a ? `Signed in as ${a.email || 'demo'}` : 'Signed out');
+      record(
+        'done',
+        a ? `Signed in as ${a.email || 'demo'}${project ? ` · project ${new URL(project.url).host}` : ''}` : 'Signed out',
+      );
       return { ok: true };
     }
 
@@ -372,6 +398,19 @@ async function handle(request: Request): Promise<unknown> {
         demo: c.demo,
         guest: c.guest,
         directory: c.directory,
+        // Reported back so the panel can say whether a corpus can be hosted at all,
+        // whichever door the project came through.
+        ...(c.url && c.anonKey && c.accessToken
+          ? {
+              project: {
+                url: c.url,
+                anonKey: c.anonKey,
+                accessToken: c.accessToken,
+                refreshToken: c.refreshToken ?? '',
+                userId: c.userId ?? '',
+              },
+            }
+          : {}),
         sessionId: c.sessionId,
         host: c.host,
       };

@@ -453,6 +453,14 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
   const [confirming, setConfirming] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
+  /*
+   * There is somewhere to sync to if you host a corpus *or* you have joined
+   * someone else's session. A joiner has no project of their own and their whole
+   * relationship with a corpus is pulling it down and pushing changes back, so
+   * gating on the project alone hid this from exactly the people who need it.
+   */
+  const canSync = Boolean(cloud.accessToken || cloud.host);
+
   const refresh = useCallback(async () => {
     setSources((await ask<Source[]>({ kind: 'listSources' })) ?? []);
   }, []);
@@ -481,13 +489,28 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
 
   return (
     <section>
-      <h2>
+      <h2 className="corpus-head">
         <button className="linky" onClick={() => setOpen(!open)}>
           {open ? '▾' : '▸'} Sources{' '}
           {/* From stats, not from `sources`: that list only loads when the section
               is opened, so a closed one used to claim the corpus was empty. */}
           <span className="soft">{count ?? '…'}</span>
         </button>
+        {/*
+          Sync lives in the heading, not inside the list.
+
+          It used to sit under `sources.length > 0`, inside a section collapsed by
+          default — so it disappeared in the one situation that needs it most: you
+          have just switched to a session, nothing has been pulled yet, and the
+          corpus is empty. No button because there are no sources, and no sources
+          until you press the button. Here it is visible in Library whenever there
+          is somewhere to sync to.
+        */}
+        {canSync && (
+          <button className="primary" onClick={() => void sync()} disabled={syncing}>
+            {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
+        )}
       </h2>
 
       {open && (
@@ -548,11 +571,6 @@ function Corpus({ onChange, count, cloud }: { onChange: () => void; count?: numb
 
           {sources.length > 0 && (
             <div className="row" style={{ marginTop: 4 }}>
-              {(cloud.accessToken || cloud.host) && (
-                <button className="primary" onClick={() => void sync()} disabled={syncing}>
-                  {syncing ? 'Syncing…' : 'Sync now'}
-                </button>
-              )}
               {confirming === '__all__' ? (
                 <button className="danger" onClick={() => act({ kind: 'wipe' })}>
                   Really erase everything?
@@ -1624,18 +1642,34 @@ const APP_URL = 'https://autorag-web.netlify.app/';
 
 function AccountGate({
   account,
+  cloud,
   onRecheck,
   onGuest,
 }: {
   account: AccountState | null;
+  /** Live settings, so the session named here is the one being written to. */
+  cloud?: CloudSettings;
   onRecheck: () => void;
   onGuest?: () => void;
 }) {
   if (account) {
+    /*
+     * The session comes from `cloud`, which `chrome.storage.onChanged` keeps live,
+     * rather than from `account`, which is a snapshot taken by `getAccount` when
+     * the panel mounted. Switching writes `cloud`, so reading the snapshot here
+     * left the header naming the session you had just left.
+     *
+     * Personal is named outright. A blank space says "no session", and the reader
+     * has to already know that means their own corpus.
+     */
+    const session = cloud?.host?.name ?? cloud?.sessionId ?? PERSONAL;
     return (
       <p className="note">
         Signed in as <strong>{account.demo ? 'demo account' : account.email || 'guest'}</strong>
-        {account.host ? ` · in ${account.host.name}` : account.sessionId ? ` · ${account.sessionId}` : ''}
+        {' · '}
+        <span className={cloud?.host ? 'session-chip shared' : 'session-chip'}>
+          {session === PERSONAL ? 'personal' : session}
+        </span>
       </p>
     );
   }
@@ -1764,12 +1798,26 @@ function PanelSessions({
 
         const next: CloudSettings = { ...cloud, sessionId: target?.id, host };
         save(next);
+        /*
+         * Tell the mirrored account too, not just `cloud`.
+         *
+         * The header reads the account, the sync reads `cloud`, and switching wrote
+         * only the second — so the panel went on naming the session you had left
+         * while keeping into the one you had entered. Which corpus you are writing
+         * to is the one thing here that must never be misreported.
+         */
+        if (account) {
+          await ask({
+            kind: 'setAccount',
+            account: { ...account, sessionId: target?.id, host },
+          });
+        }
         const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
         if (!res.ok) throw new Error(res.error);
         return { pulled: res.data.pulled };
       },
     }),
-    [cloud, save],
+    [cloud, save, account],
   );
 
   return (
@@ -1779,6 +1827,7 @@ function PanelSessions({
         activeSessionId={cloud.sessionId ?? PERSONAL}
         hostedName={cloud.host?.name}
         hostProject={cloud.host}
+        /* Either door: attached in this panel, or mirrored from the web app. */
         canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
         signedIn={Boolean(account?.directory)}
         onChanged={onChanged}
@@ -1883,7 +1932,7 @@ function App() {
       <header>
         <h1>Autorag</h1>
         <div className="chips">
-          <AccountGate account={account} onRecheck={recheckAccount} />
+          <AccountGate account={account} cloud={cloud} onRecheck={recheckAccount} />
           <ModelStatus stats={stats} />
           <WebmcpStatus />
         </div>

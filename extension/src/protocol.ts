@@ -135,6 +135,35 @@ export interface AccountState {
    */
   guest?: boolean;
   directory?: { accessToken: string; refreshToken: string; userId: string };
+  /**
+   * The Supabase project this person hosts their own corpus in, if they have one.
+   *
+   * ## Why this has to travel, and what went wrong while it did not
+   *
+   * Sessions are mirrored here and the project was not, which looks harmless — the
+   * panel has its own "Project setup" — and is not. Attaching a project on the web
+   * app left the extension holding a session id with no credentials to reach it,
+   * and the failure was silent in the worst direction: switching to a session you
+   * *own* went down the no-`host` branch of `sync`, matched
+   * `!accessToken || !refreshToken`, and threw. Nothing was pulled, so the panel
+   * showed an empty corpus for a session with passages in it, while the web app
+   * showed the same session full.
+   *
+   * It also made `canHost` false, so the panel asked for a project the person had
+   * already attached, and hid the Sync button that would have said so.
+   *
+   * The tokens are the project's own, and they land in `chrome.storage.local`
+   * beside the ones the panel would store if you attached the project here
+   * instead — the same bar, reached by the other door. `externally_connectable`
+   * names the two origins allowed to send this at all.
+   */
+  project?: {
+    url: string;
+    anonKey: string;
+    accessToken: string;
+    refreshToken: string;
+    userId: string;
+  };
   sessionId?: string;
   host?: { url: string; anonKey: string; name: string };
 }

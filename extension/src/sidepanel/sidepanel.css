@@ -396,3 +396,15 @@ ul.sessions code {
 /* The shared `Fold` wraps its contents; the panel's own folds do not. */
 .fold-body { display: grid; gap: 10px; }
 .btn.small { padding: 4px 9px; font-size: 12px; }
+
+/* Sync sits in the Sources heading, so it is reachable without expanding the
+   list — the state where you most need it is the one where the list is empty. */
+.corpus-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.corpus-head .linky { flex: 1; text-align: left; }
+.corpus-head button.primary { min-height: 28px; padding: 4px 10px; font-size: 12px; }
+
+/* Which corpus you are writing into, in the header, on every tab. A joined
+   session is coloured as a warning: what you approve there lands in someone
+   else's project and is readable by everyone in it. */
+.session-chip { color: var(--accent-strong); font-weight: 600; }
+.session-chip.shared { color: var(--warn); }
