@@ -875,17 +875,50 @@ function AnswerSettings({
 
 const EMPTY_CLOUD: CloudSettings = { url: '', anonKey: '' };
 
+/**
+ * The stored settings, kept current.
+ *
+ * ## Why the listener is the whole point
+ *
+ * This read storage once on mount and never again, which was fine while the panel
+ * was the only thing writing it. It is not any more: the web app pushes the
+ * account in, and that arrives *after* the panel has already loaded.
+ *
+ * The result was two sources of truth, one of them frozen. `useAccount` polls, so
+ * it saw the account and lifted the gate; this held the copy taken before the
+ * account existed, so every request built from it went out with no `directory` and
+ * came back "Sign in first — a session needs an owner" to somebody who had just
+ * watched the panel let them in. The panel disagreed with itself, and the half
+ * that was wrong was the half doing the work.
+ *
+ * `chrome.storage.onChanged` fires for writes from anywhere — this panel, the
+ * offscreen document, the service worker acting for the web app — so there is one
+ * copy and it is never behind.
+ */
 function useCloud(): [CloudSettings, (next: CloudSettings) => void] {
   const [cloud, setCloud] = useState<CloudSettings>(EMPTY_CLOUD);
+
   useEffect(() => {
     void chrome.storage.local
       .get('cloud')
       .then((v) => setCloud((v.cloud as CloudSettings) ?? EMPTY_CLOUD));
+
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area !== 'local' || !changes.cloud) return;
+      setCloud((changes.cloud.newValue as CloudSettings) ?? EMPTY_CLOUD);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
-  const save = (next: CloudSettings) => {
+
+  const save = useCallback((next: CloudSettings) => {
     setCloud(next);
     void chrome.storage.local.set({ cloud: next });
-  };
+  }, []);
+
   return [cloud, save];
 }
 
