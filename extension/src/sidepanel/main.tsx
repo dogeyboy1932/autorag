@@ -1558,6 +1558,9 @@ function Sessions({
             A session lets several people share one memory. Connect a Supabase project
             above and sign in, and your sessions appear here.
           </p>
+          {/* <p>
+            {cloud.toString()}
+          </p> */}
         </div>
       </section>
     );

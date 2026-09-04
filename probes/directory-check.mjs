@@ -47,13 +47,6 @@ try {
 }
 
 /*
- * Either spelling. The Netlify Function needs these named DIRECTORY_* so the two
- * Supabase projects cannot be confused on a deploy, and .env2 was renamed to
- * match — which silently broke every probe that read SUPABASE_*. Accepting both
- * costs one `??` and means a naming decision in one place cannot take the checks
- * down in another.
- */
-/*
  * DIRECTORY_*, and deliberately without SUPABASE_* as a fallback.
  *
  * There are two Supabase projects in this repo and the generic name does not say

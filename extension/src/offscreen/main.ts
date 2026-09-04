@@ -33,6 +33,7 @@ import { askModel, standaloneQuery } from './answer';
 import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
 import {
   directoryConfigured,
+  signInAnonymously,
   inviteToSession,
   listSessions,
   publishProfile,
@@ -219,6 +220,85 @@ async function handle(request: Request): Promise<unknown> {
       }
       record('done', `Signed in to cloud memory as ${request.email}${note}`);
       return { ...session, directory, directoryError: note.trim() || undefined };
+    }
+
+    /*
+     * Identity, with no Supabase project anywhere in it.
+     *
+     * This is the whole point of the split. Signing in used to demand a project
+     * URL and key before it would authenticate anything, so somebody who only
+     * wanted to join a session — which needs no project of their own — could not
+     * get an account at all.
+     *
+     * No profile is published here. A profile says where a corpus lives, and
+     * someone without a project has nothing to say; it is written by
+     * `attachProject` instead.
+     */
+    case 'signIn':
+    case 'signUp': {
+      if (!directoryConfigured()) throw new Error('Accounts are unavailable: no directory is configured in this build.');
+      const account = await signInOrUp(request.email, request.password);
+      record('done', `Signed in as ${request.email}`);
+      return {
+        email: request.email,
+        directory: {
+          accessToken: account.accessToken,
+          refreshToken: account.refreshToken,
+          userId: account.userId,
+        },
+      };
+    }
+
+    case 'signInAnonymously': {
+      if (!directoryConfigured()) throw new Error('Demo mode is unavailable: no directory is configured in this build.');
+      const account = await signInAnonymously();
+      record('done', 'Signed in for the demo');
+      return {
+        email: '',
+        demo: true,
+        directory: {
+          accessToken: account.accessToken,
+          refreshToken: account.refreshToken,
+          userId: account.userId,
+        },
+      };
+    }
+
+    case 'signOut': {
+      record('done', 'Signed out');
+      return { ok: true };
+    }
+
+    /*
+     * Hosting. Optional, and only for the person whose corpus it is.
+     *
+     * The profile is published here rather than at sign-in because this is the
+     * first moment there is anything true to publish — without it, a session this
+     * person hosts would resolve to nothing for everyone they gave the code to.
+     */
+    case 'attachProject': {
+      const cfg = { url: request.url, anonKey: request.anonKey };
+      const email = (await cloudSettings())?.email ?? '';
+      if (!email) throw new Error('Sign in first — a project is attached to an account.');
+      const project = request.create
+        ? await signUp(cfg, email, request.password)
+        : await signIn(cfg, email, request.password);
+
+      const dir = (await storage.get<CloudSettings>('cloud'))?.directory;
+      if (dir) {
+        await publishProfile(
+          { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email, userId: dir.userId },
+          { userId: dir.userId, email, cloud: cfg },
+        );
+      }
+      record('done', `Attached ${new URL(cfg.url).host}`);
+      return {
+        url: cfg.url,
+        anonKey: cfg.anonKey,
+        accessToken: project.accessToken,
+        refreshToken: project.refreshToken,
+        userId: project.userId,
+      };
     }
 
     case 'listSessions': {
@@ -580,6 +660,20 @@ async function handle(request: Request): Promise<unknown> {
     case 'listSources': {
       const [sources, chunks] = await Promise.all([allSources(), allChunks()]);
       return sources
+        /*
+         * A page with nothing kept from it is not a source.
+         *
+         * Discarding every passage from a page used to leave the page itself in
+         * this list, citing nothing — it looked like something had been kept and
+         * offered no way to tell that nothing had. Its rejected chunks are still
+         * on disk and must stay there, because their text is what future
+         * screening matches against; they are simply not a reason to list the
+         * page. Pending ones still count, so something awaiting review does not
+         * vanish before it has been looked at.
+         */
+        .filter((s) =>
+          chunks.some((c) => c.sourceId === s.id && c.status !== 'rejected'),
+        )
         .map((s) => {
           const mine = chunks.filter((c) => c.sourceId === s.id);
           return {
@@ -594,6 +688,15 @@ async function handle(request: Request): Promise<unknown> {
             rejected: mine.filter((c) => c.status === 'rejected').length,
           };
         })
+        /*
+         * A page nothing survived from is not a source any more.
+         *
+         * Discarding every passage from a page used to leave it here citing
+         * nothing — a row that looked like kept material and was the record of
+         * material explicitly turned down. Still listed while anything is awaiting
+         * review, because that is work in progress rather than a decision.
+         */
+        .filter((s) => s.approved > 0 || s.pending > 0)
         .sort((a, b) => b.ingested_at.localeCompare(a.ingested_at));
     }
 

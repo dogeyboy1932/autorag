@@ -70,6 +70,22 @@ export type Request =
    * this mirrors, it does not relocate.
    */
   | { kind: 'sync'; cloud: CloudSettings }
+  /*
+   * Identity: an email and a password against the directory. No Supabase project,
+   * because joining someone else's session needs none — only hosting your own
+   * corpus does. Requiring one here was what made sessions untestable.
+   */
+  | { kind: 'signIn'; email: string; password: string }
+  | { kind: 'signUp'; email: string; password: string }
+  /** A burner account for demo mode. No email, nothing to confirm. */
+  | { kind: 'signInAnonymously' }
+  | { kind: 'signOut' }
+  /*
+   * Hosting: attach your own Supabase project. Separate password on purpose — it
+   * authenticates to a different system, and making them match means changing one
+   * silently breaks the other.
+   */
+  | { kind: 'attachProject'; url: string; anonKey: string; password: string; create: boolean }
   | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean }
   /** Every session this person can reach: their own, invited, and open ones. */
   | { kind: 'listSessions'; cloud: CloudSettings }
@@ -90,6 +106,14 @@ export interface CloudSettings {
   email?: string;
   /** This person's id in their *own* project — what RLS scopes their rows by. */
   userId?: string;
+  /**
+   * True while this is a burner account made by Demo mode.
+   *
+   * Kept so the UI can say what it is rather than showing a random placeholder
+   * address as though the person chose it, and so signing out can offer to
+   * discard it instead of leaving an account nobody can ever sign back into.
+   */
+  demo?: boolean;
   /**
    * The directory account: who this person is for the purpose of owning sessions
    * and receiving invites.

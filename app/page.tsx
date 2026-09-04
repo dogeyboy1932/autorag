@@ -2,7 +2,7 @@
 
 import ActivityLog from '@/components/ActivityLog';
 import CorpusView from '@/components/CorpusView';
-import DemoMode from '@/components/DemoMode';
+import Shell from '@/components/Shell';
 import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
 import IngestForm from '@/components/IngestForm';
@@ -14,6 +14,7 @@ import WarmupBar from '@/components/WarmupBar';
 
 export default function Home() {
   return (
+    <Shell>
     <main style={{ maxWidth: 920, margin: '0 auto', padding: '40px 24px 80px' }}>
       <header style={{ marginBottom: 22 }}>
         <div
@@ -43,7 +44,6 @@ export default function Home() {
         {/* First, because until today the zip was served and nothing linked to it:
             someone landing here had no route to the half of the product that runs
             on the pages they actually read. */}
-        <DemoMode />
         <GetExtension />
         <IngestForm />
         <ReviewQueue />
@@ -59,5 +59,6 @@ export default function Home() {
         <code>document.modelContext</code>.
       </footer>
     </main>
+    </Shell>
   );
 }
