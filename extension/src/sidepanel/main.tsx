@@ -958,6 +958,14 @@ function Memory({
   const [copied, setCopied] = useState(false);
 
   const signedIn = Boolean(cloud.accessToken);
+  /*
+   * There is something to sync if you host a corpus *or* you have joined someone
+   * else's session. The button used to hang off `signedIn` alone, which is true
+   * only for a person with their own project attached — so it was hidden from
+   * exactly the people who most need it: a joiner, whose whole relationship with a
+   * corpus is pulling it down and pushing changes back.
+   */
+  const canSync = Boolean(cloud.accessToken || cloud.host);
 
   async function connect(create: boolean) {
     setBusy(create ? 'creating' : 'signing in');
@@ -1138,17 +1146,19 @@ function Memory({
               )}
             </>
           )}
-          {signedIn && (
+          {canSync && (
             <div className="row">
               <button className="primary" onClick={() => void sync()} disabled={busy !== null}>
                 {busy === 'syncing' ? 'Syncing…' : 'Sync now'}
               </button>
-              <button
-                className="danger"
-                onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey })}
-              >
-                Sign out
-              </button>
+              {signedIn && (
+                <button
+                  className="danger"
+                  onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey, directory: cloud.directory, email: cloud.email })}
+                >
+                  Detach project
+                </button>
+              )}
             </div>
           )}
           {msg && <p className="note">{msg}</p>}
@@ -1746,6 +1756,7 @@ function PanelSessions({
       api={api}
       activeSessionId={cloud.sessionId ?? PERSONAL}
       hostedName={cloud.host?.name}
+      hostProject={cloud.host}
       canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
       signedIn={Boolean(account?.directory)}
       onChanged={onChanged}

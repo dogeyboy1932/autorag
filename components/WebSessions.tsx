@@ -137,6 +137,7 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
       api={api}
       activeSessionId={account?.sessionId ?? PERSONAL}
       hostedName={account?.host?.name}
+      hostProject={account?.host}
       canHost={Boolean(account?.project)}
       signedIn={Boolean(account?.directory)}
       onChanged={onChanged}

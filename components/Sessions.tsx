@@ -46,6 +46,7 @@ export default function Sessions({
   api,
   activeSessionId,
   hostedName,
+  hostProject,
   canHost,
   signedIn,
   onChanged,
@@ -54,6 +55,8 @@ export default function Sessions({
   activeSessionId: string;
   /** Set when the active session belongs to someone else. */
   hostedName?: string;
+  /** The host's project, so Sync can re-reach a joined session. */
+  hostProject?: { url: string; anonKey: string; name: string };
   /** Whether a Supabase project is attached — required to *host*, never to join. */
   canHost: boolean;
   signedIn: boolean;
@@ -130,6 +133,25 @@ export default function Sessions({
           onClick={() => void go(null, 'Personal')}
         >
           {active === PERSONAL ? 'In your personal memory' : 'Back to personal'}
+        </Button>
+        {/*
+          Always here, never conditional. Sync is how a shared corpus is read at
+          all — a member's whole relationship with it is pulling down what other
+          people kept and pushing back what they changed — and hiding the button
+          behind whether you happen to own a project made it unavailable to
+          precisely the people who live on it.
+        */}
+        <Button
+          tone="primary"
+          disabled={busy !== null}
+          onClick={() =>
+            void go(
+              active === PERSONAL ? null : { id: active, host: hostProject },
+              active === PERSONAL ? 'Personal' : hostedName || active,
+            )
+          }
+        >
+          {busy ? 'Syncing…' : 'Sync now'}
         </Button>
       </div>
 
