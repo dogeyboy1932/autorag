@@ -45,8 +45,13 @@ const readEnv = (name) => {
 
 const corpus = readEnv('.env');
 const directory = readEnv('.env2');
-if (!corpus?.SUPABASE_URL || !directory?.SUPABASE_URL) {
-  console.log('SKIP  .env (corpus) and .env2 (directory) are both needed');
+/*
+ * SUPABASE_* is the corpus project, DIRECTORY_* is the directory. One name per
+ * thing, with no fallback between them: there are two Supabase projects here and
+ * a check pointed at the wrong one would pass while proving nothing.
+ */
+if (!corpus?.SUPABASE_URL || !directory?.DIRECTORY_URL) {
+  console.log('SKIP  needs SUPABASE_URL in .env and DIRECTORY_URL in .env2');
   process.exit(0);
 }
 
@@ -67,12 +72,16 @@ const ok = (cond, name, note = '') => {
   }
 };
 
+// Each env file names its own project; this reads whichever pair is present.
+const urlOf = (env) => (env.SUPABASE_URL ?? env.DIRECTORY_URL).replace(/\/$/, '');
+const secretOf = (env) => env.SUPABASE_SECRET_KEY ?? env.DIRECTORY_SECRET_KEY;
+
 const admin = (env, path, init = {}) =>
-  fetch(`${env.SUPABASE_URL.replace(/\/$/, '')}/${path}`, {
+  fetch(`${urlOf(env)}/${path}`, {
     ...init,
     headers: {
-      apikey: env.SUPABASE_SECRET_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SECRET_KEY}`,
+      apikey: secretOf(env),
+      Authorization: `Bearer ${secretOf(env)}`,
       'content-type': 'application/json',
       ...init.headers,
     },
@@ -265,8 +274,8 @@ try {
    * account and nothing but the directory's publishable key. Exercised the same
    * way here — a bare fetch holding only that key.
    */
-  const dirUrl = directory.SUPABASE_URL.replace(/\/$/, '');
-  const dirKey = directory.SUPABASE_PUBLISHABLE_KEY;
+  const dirUrl = directory.DIRECTORY_URL.replace(/\/$/, '');
+  const dirKey = directory.DIRECTORY_PUBLISHABLE_KEY;
   const anon = await (
     await fetch(`${dirUrl}/auth/v1/signup`, {
       method: 'POST',

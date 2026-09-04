@@ -46,11 +46,38 @@ try {
   process.exit(1);
 }
 
-const U = env.SUPABASE_URL?.replace(/\/$/, '');
-const PK = env.SUPABASE_PUBLISHABLE_KEY;
-const SK = env.SUPABASE_SECRET_KEY;
+/*
+ * Either spelling. The Netlify Function needs these named DIRECTORY_* so the two
+ * Supabase projects cannot be confused on a deploy, and .env2 was renamed to
+ * match — which silently broke every probe that read SUPABASE_*. Accepting both
+ * costs one `??` and means a naming decision in one place cannot take the checks
+ * down in another.
+ */
+/*
+ * DIRECTORY_*, and deliberately without SUPABASE_* as a fallback.
+ *
+ * There are two Supabase projects in this repo and the generic name does not say
+ * which. Accepting both spellings makes that ambiguity permanent and lets a check
+ * pass while pointed at the wrong database — the exact failure this naming exists
+ * to prevent. One name per thing: SUPABASE_* is the corpus project in .env,
+ * DIRECTORY_* is the directory in .env2.
+ */
+const U = env.DIRECTORY_URL?.replace(/\/$/, '');
+const PK = env.DIRECTORY_PUBLISHABLE_KEY;
+const SK = env.DIRECTORY_SECRET_KEY;
 if (!U || !PK || !SK) {
-  console.error(`${envFile} is missing SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY or SUPABASE_SECRET_KEY`);
+  const missing = [
+    !U && 'DIRECTORY_URL',
+    !PK && 'DIRECTORY_PUBLISHABLE_KEY',
+    !SK && 'DIRECTORY_SECRET_KEY',
+  ].filter(Boolean);
+  console.error(`${envFile} is missing ${missing.join(', ')} — see .env2.example.`);
+  if (env.SUPABASE_URL || env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_SECRET_KEY) {
+    console.error(
+      'It has SUPABASE_* names instead. Those mean the corpus project; the directory uses ' +
+        'DIRECTORY_* so a deploy cannot point the two at each other. Rename them.',
+    );
+  }
   process.exit(1);
 }
 

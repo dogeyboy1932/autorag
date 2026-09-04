@@ -8,6 +8,7 @@ out/
 .env*
 !.env.example
 !.env.local.example
+!.env2.example
 .vercel
 *.tsbuildinfo
 next-env.d.ts

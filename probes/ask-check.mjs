@@ -1,7 +1,8 @@
 /**
  * Does the demo endpoint answer, count, and refuse?
  *
- *   pnpm ask:check      # needs ANTHROPIC_API_KEY in .env and .env2 for the counter
+ *   pnpm ask:check      # needs ANTHROPIC_API_KEY, DIRECTORY_URL and
+ *                       # DIRECTORY_SECRET_KEY in .env2 — the same three Netlify needs
  *
  * Runs the Netlify Function in this process — no deploy, no netlify dev — because
  * the thing worth checking is its logic, and a deploy is a slow way to discover
@@ -35,17 +36,22 @@ const readEnv = (name) => {
   }
 };
 
-const corpusEnv = readEnv('.env') ?? {};
 const directoryEnv = readEnv('.env2') ?? {};
 
-if (!corpusEnv.ANTHROPIC_API_KEY) {
-  console.log('SKIP  no ANTHROPIC_API_KEY in .env');
+/*
+ * All three live in .env2, which is the deploy's configuration rather than either
+ * project's: the Anthropic key is what the Function spends, and the directory is
+ * where it counts. Exactly the three variables Netlify needs, under exactly the
+ * names it needs them, so this check fails for the same reason a deploy would.
+ */
+if (!directoryEnv.ANTHROPIC_API_KEY) {
+  console.log('SKIP  no ANTHROPIC_API_KEY in .env2');
   process.exit(0);
 }
 
-process.env.ANTHROPIC_API_KEY = corpusEnv.ANTHROPIC_API_KEY;
-process.env.DIRECTORY_URL = directoryEnv.SUPABASE_URL ?? '';
-process.env.DIRECTORY_SECRET_KEY = directoryEnv.SUPABASE_SECRET_KEY ?? '';
+process.env.ANTHROPIC_API_KEY = directoryEnv.ANTHROPIC_API_KEY;
+process.env.DIRECTORY_URL = directoryEnv.DIRECTORY_URL ?? '';
+process.env.DIRECTORY_SECRET_KEY = directoryEnv.DIRECTORY_SECRET_KEY ?? '';
 
 const { default: handler } = await import('../netlify/functions/ask.ts');
 

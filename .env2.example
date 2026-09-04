@@ -1,0 +1,51 @@
+# Copy to `.env2`. Git-ignored, like every other env file here.
+#
+# ## What this file is
+#
+# The directory project and the deploy's secrets — the author's configuration, not
+# a user's. A person running Autorag needs none of this; they need `.env`, which is
+# their own corpus project.
+#
+# ## Why DIRECTORY_ and not SUPABASE_
+#
+# There are two Supabase projects in this repo and `SUPABASE_URL` does not say
+# which. Pointed at the wrong one, the demo counter finds no `demo_usage` table and
+# the demo pauses with nothing saying which database was wrong — and every check
+# would still pass, because it would be consistently wrong.
+#
+# So: `SUPABASE_*` in `.env` means the corpus project, `DIRECTORY_*` here means the
+# directory, and nothing accepts the other spelling as a fallback. The probes fail
+# loudly on the wrong name rather than quietly on the wrong database.
+#
+# These are also exactly the three names Netlify wants, so `pnpm ask:check` fails
+# for the same reason a deploy would.
+
+# The directory project's REST URL, e.g. https://<ref>.supabase.co
+DIRECTORY_URL=
+
+# `sb_publishable_…`. Committed into src/rag/directory.ts as well, because every
+# client has to reach the directory to resolve a session code. `pnpm dir:check`
+# fails if the two disagree.
+DIRECTORY_PUBLISHABLE_KEY=
+
+# `sb_secret_…`. Bypasses row-level security and can read every row of `profiles`,
+# which is where other people's project credentials live. Never in client code,
+# never in src/, never committed. Used by `pnpm dir:check` and by the Netlify
+# Function's usage counter.
+DIRECTORY_SECRET_KEY=
+
+# The key the demo endpoint spends. Server-side only: the site is a static export,
+# so a key in the bundle is readable by anyone who opens devtools. Set a spend
+# limit on it — the ten-answer cap is keyed on a hash of the request address and a
+# VPN defeats it.
+ANTHROPIC_API_KEY=
+
+# ---------------------------------------------------------------------------
+# Netlify needs these three, under these names, at
+# Site configuration → Environment variables:
+#
+#   ANTHROPIC_API_KEY
+#   DIRECTORY_URL
+#   DIRECTORY_SECRET_KEY
+#
+# This file is not read by the deploy. Nothing git-ignored is.
