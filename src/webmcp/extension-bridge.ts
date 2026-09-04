@@ -1,87 +1,79 @@
 /**
- * Talking to the extension from the web app, when it is installed.
+ * Talking to the extension from the web app.
  *
- * ## Why this needs an id at all
+ * ## Why not `chrome.runtime.sendMessage(EXTENSION_ID, …)`
  *
- * `chrome.runtime.sendMessage` from a page requires the extension's id — there is
- * no "ask whoever is listening". The id is derived from the unpacked directory
- * path, so it is stable for anyone who unzips the download and loads it, which is
- * every user of this build. It is not a secret: it is visible on chrome://
- * extensions, and reaching this extension still requires being one of the origins
- * named in its `externally_connectable`.
+ * That is the documented way, and it was the first thing here, and it was silently
+ * broken for anybody who was not me. It needs the extension's id — and an unpacked
+ * extension's id is derived from the *directory it was loaded from*. The id
+ * compiled into this file matched one machine's checkout. Load the same build from
+ * a downloaded zip, or any other folder, and every message goes to an extension
+ * that does not exist: sign-in never arrives, sign-out never arrives, and the
+ * panel's Check again reads an empty box. No error, because a message to a missing
+ * extension is not an error.
  *
- * ## Why detection is a separate, cheap message
+ * ## What this does instead
  *
- * `ping` is answered by the service worker without waking the offscreen document.
- * Every page load asks, and the offscreen document owns a 90MB embedding model —
- * loading it to answer "are you there" would make the site slow for the people who
- * have the extension, which is exactly backwards.
+ * `window.postMessage`, answered by the content script the extension already
+ * injects into every page — this one included. That script *is* the extension, so
+ * it needs no id, no `externally_connectable` entry, and no knowledge of where it
+ * was installed from. If it is not there, nothing answers, and the timeout below
+ * is the whole of "no extension installed".
  *
- * ## Why absence is not an error
- *
- * Most visitors will not have it. Chrome answers a message to an extension that is
- * not installed by setting `runtime.lastError` and calling back with undefined, so
- * "not installed" arrives looking like a failure. It is a normal state, and the
- * page says so rather than reporting a fault.
+ * The bridge accepts memory-tool calls from any page on purpose; the account
+ * messages it carries are restricted to Autorag's own origins, enforced in the
+ * content script where a page cannot reach.
  */
 
-/**
- * Stable while the extension is loaded unpacked from a directory named
- * `extension/dist`, because Chrome derives an unpacked id from the path. Anyone
- * who unzips the download and loads the folder gets this id.
- */
-export const EXTENSION_ID = 'obeilcdjggcekgfmiiadlcmfdhifajob';
+import { PAGE_REQUEST, PAGE_RESPONSE } from '@/extension/src/protocol';
 
-type ChromeLike = {
-  runtime?: {
-    sendMessage?: (id: string, message: unknown, cb: (response: unknown) => void) => void;
-    lastError?: { message?: string };
-  };
-};
+let seq = 0;
 
-const runtime = () => (globalThis as unknown as { chrome?: ChromeLike }).chrome?.runtime;
+function call<T>(request: unknown, timeoutMs: number): Promise<T | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
 
-function send<T>(message: unknown, timeoutMs = 2000): Promise<T | null> {
-  const rt = runtime();
-  if (!rt?.sendMessage) return Promise.resolve(null);
   return new Promise<T | null>((resolve) => {
-    /*
-     * A timeout as well as the callback. If the extension is mid-restart the
-     * callback can simply never fire, and a promise that never settles turns a
-     * detection check into a page that renders nothing.
-     */
-    const timer = setTimeout(() => resolve(null), timeoutMs);
-    try {
-      rt.sendMessage!(EXTENSION_ID, message, (response) => {
-        clearTimeout(timer);
-        // Reading lastError is what tells Chrome the failure was handled; leaving
-        // it unread logs "Unchecked runtime.lastError" on every page load.
-        void rt.lastError;
-        resolve((response as T) ?? null);
-      });
-    } catch {
+    const id = `web-${++seq}-${Date.now()}`;
+    let settled = false;
+
+    const done = (value: T | null) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('message', onMessage);
       clearTimeout(timer);
-      resolve(null);
+      resolve(value);
+    };
+
+    function onMessage(event: MessageEvent) {
+      if (event.source !== window) return;
+      const data = event.data as { type?: string; id?: string; result?: { ok?: boolean; data?: T } };
+      if (data?.type !== PAGE_RESPONSE || data.id !== id) return;
+      done(data.result?.ok ? ((data.result.data ?? null) as T) : null);
     }
+
+    window.addEventListener('message', onMessage);
+    /*
+     * The timeout is not an error path, it is the answer. Most visitors have no
+     * extension, so nothing replies, and a promise that never settles would hang
+     * whatever awaited it.
+     */
+    const timer = setTimeout(() => done(null), timeoutMs);
+    window.postMessage({ type: PAGE_REQUEST, id, request }, window.location.origin);
   });
 }
 
-/** Is the extension installed and awake? Null-safe, and cheap enough to call on load. */
+/** Is the extension present? Cheap enough to call on every page load. */
 export async function extensionPresent(): Promise<{ version: string } | null> {
-  const res = await send<{ ok?: boolean; version?: string }>({ type: 'autorag:ping' });
-  return res?.ok ? { version: res.version ?? 'unknown' } : null;
+  const res = await call<{ model_ready?: boolean }>({ kind: 'stats' }, 1500);
+  return res ? { version: 'installed' } : null;
 }
 
 /**
  * Runs one of the extension's own requests against its corpus.
  *
- * The envelope is the same one the panel uses, so this is not a second API with
- * its own drift — it is the existing one reached from a different origin.
+ * The same envelope the panel uses, so this is not a second API with its own
+ * drift — it is the existing one reached from a page.
  */
 export async function askExtension<T>(request: unknown): Promise<T | null> {
-  const res = await send<{ ok?: boolean; data?: T }>(
-    { __autorag: true, to: 'worker', id: 'web', request },
-    30_000,
-  );
-  return res?.ok ? ((res.data ?? null) as T) : null;
+  return await call<T>(request, 30_000);
 }

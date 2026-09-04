@@ -29,6 +29,8 @@ import { extensionPresent } from '@/src/webmcp/extension-bridge';
 export default function GetExtension() {
   const [copied, setCopied] = useState(false);
   const [installed, setInstalled] = useState<{ version: string } | null>(null);
+  // `version` is vestigial: detection is now "did the extension's content script
+  // answer", which proves it is there and says nothing about which build it is.
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export default function GetExtension() {
       title={installed ? 'The extension is installed' : 'Keep things from the pages you read'}
       right={
         installed ? (
-          <span style={{ fontSize: 12, color: 'var(--accent)' }}>v{installed.version} · connected</span>
+          <span style={{ fontSize: 12, color: 'var(--accent)' }}>connected</span>
         ) : (
         <a
           href="/autorag-extension.zip"

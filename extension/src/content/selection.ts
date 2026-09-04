@@ -32,10 +32,34 @@ watchSelection();
 
 /* ---------- 2. bridge: page tool calls -> service worker -> offscreen ---------- */
 
+/**
+ * Requests that carry or reveal who is signed in, which only Autorag's own pages
+ * may make.
+ *
+ * Everything else on this bridge is a memory tool: an agent on any page is meant
+ * to be able to call them, which is the entire point of publishing them. These two
+ * are different — one hands over an account, the other reads it back — so they are
+ * limited to the origins that own the account in the first place.
+ *
+ * Checked against the *page's* origin here in the isolated world, where a page
+ * cannot reach in and change it.
+ */
+const ACCOUNT_KINDS = new Set(['setAccount', 'getAccount']);
+const APP_ORIGINS = ['https://autorag-web.netlify.app', 'http://localhost:3111'];
+
 window.addEventListener('message', async (event) => {
   if (event.source !== window) return;
   const msg = event.data;
   if (!msg || msg.type !== PAGE_REQUEST) return;
+
+  const kind = (msg.request as { kind?: string } | undefined)?.kind;
+  if (kind && ACCOUNT_KINDS.has(kind) && !APP_ORIGINS.includes(location.origin)) {
+    window.postMessage(
+      { type: PAGE_RESPONSE, id: msg.id, result: { ok: false, error: 'not an Autorag origin' } },
+      window.location.origin,
+    );
+    return;
+  }
 
   let result: { ok: boolean; data?: unknown; error?: string };
   try {
