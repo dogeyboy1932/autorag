@@ -22,10 +22,17 @@
   # export has no server, so there is nowhere else a secret could live: anything
   # in the bundle is readable by anyone who opens devtools.
   #
-  # Needs ANTHROPIC_API_KEY, SUPABASE_URL and SUPABASE_SECRET_KEY set on the
-  # deploy (Site configuration → Environment variables). The last two are the
-  # *directory* project's, and the secret key is what lets the Function read a
-  # usage table nobody else can touch.
+  # Needs three variables on the deploy (Site configuration → Environment
+  # variables):
+  #
+  #   ANTHROPIC_API_KEY      the author's key. Set a spend limit on it.
+  #   DIRECTORY_URL          the DIRECTORY project (.env2), not the corpus one
+  #   DIRECTORY_SECRET_KEY   its sb_secret_ key, which is what lets the Function
+  #                          read a usage table nobody else can touch
+  #
+  # Named DIRECTORY_* rather than SUPABASE_* on purpose: there are two Supabase
+  # projects here, and pointing the counter at the corpus one finds no demo_usage
+  # table and pauses the demo with nothing saying which database was wrong.
   directory = "netlify/functions"
 
 [build.environment]
