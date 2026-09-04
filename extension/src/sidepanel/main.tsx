@@ -1715,6 +1715,7 @@ function PanelSessions({
   const api: SessionsApi = useMemo(
     () => ({
       list: async () => {
+        if (cloud.demo) return [];
         // One call. An earlier version asked twice — once to test `ok` and again
         // to read `data` — which doubled every refresh against the directory.
         const res = await askDetailed<SessionSummary[]>({ kind: 'listSessions', cloud });

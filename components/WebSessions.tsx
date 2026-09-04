@@ -82,7 +82,7 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
     };
 
     return {
-      list: async () => (session ? await listSessions(session) : []),
+      list: async () => (session && !account?.demo ? await listSessions(session) : []),
 
       create: async (name, openJoin) => {
         const s = need();
