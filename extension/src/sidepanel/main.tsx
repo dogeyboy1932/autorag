@@ -930,16 +930,32 @@ function Memory({
     setBusy(create ? 'creating' : 'signing in');
     setMsg(null);
     const next = { ...cloud, url: url.trim(), anonKey: key.trim() };
+    /*
+     * Attaches a project. It does not create an account, and that distinction is
+     * what was broken here.
+     *
+     * This used to call `cloudSignIn`, which signed into the project *and* tried to
+     * make a matching directory account from the same password. Once the two were
+     * separated those passwords stopped being the same thing, so the directory half
+     * failed — usually with "already registered" — and left the panel with a
+     * working project and no identity. Creating a session then failed with "Sign in
+     * first" while the person was demonstrably signed in to their project, and no
+     * profile was ever published, so any session they did make resolved to nothing
+     * for everyone they gave the code to.
+     *
+     * Identity comes from the web app and arrives already mirrored. This only needs
+     * the project.
+     */
     const res = await askDetailed<{
+      url: string;
+      anonKey: string;
       accessToken: string;
       refreshToken: string;
-      email: string;
       userId: string;
-      directory?: { accessToken: string; refreshToken: string; userId: string };
-      directoryError?: string;
     }>({
-      kind: 'cloudSignIn',
-      cloud: next,
+      kind: 'attachProject',
+      url: url.trim(),
+      anonKey: key.trim(),
       email: email.trim(),
       password,
       create,
@@ -968,12 +984,7 @@ function Memory({
           person creates resolves to nothing for everyone they give the code to —
           and they would have no way to tell that from the other side.
         */}
-        {res.data.directoryError && (
-          <>
-            <br />
-            Sessions are unavailable: {res.data.directoryError}
-          </>
-        )}
+
       </>,
     );
     onSynced();
@@ -1020,7 +1031,18 @@ function Memory({
                 <input placeholder="anon public key" value={key} onChange={(e) => setKey(e.target.value)} />
               </div>
               <div className="row">
-                <input placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                {/*
+                  The project's own login, prefilled from the account. Usually the
+                  same address — most people sign up for both with one email — but
+                  it need not be: the project may predate the account or sit on a
+                  work address. Prefilled so the common case is not retyped, and
+                  editable so the uncommon one is not a dead end.
+                */}
+                <input
+                  placeholder="email for this project"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </div>
               <div className="row">
                 <input
@@ -1768,7 +1790,7 @@ function App() {
         <header className="top">
           <strong>Autorag</strong>
         </header>
-        <div className="tab-body">
+        <div className="pane">
           <section>
             <h2>
               Sign in <span className="soft">on the web app</span>

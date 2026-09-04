@@ -42,6 +42,15 @@ header { padding: 14px 16px 10px; }
   flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
 /* The chat manages its own three scroll zones, so the pane must not add a fourth. */
 .pane:has(.chat) { overflow: hidden; }
+/*
+ * Sections keep their natural height; the pane scrolls.
+ *
+ * A flex column shrinks its children by default, so a tall section — the sessions
+ * list, once a few exist — was squeezed to fit and then clipped by its own
+ * `overflow: hidden`, with no scrollbar anywhere to reveal the rest. The content
+ * was rendered and simply unreachable.
+ */
+.pane > * { flex-shrink: 0; }
 .pane hr { margin: 0; border: none; border-top: 1px solid var(--border); }
 
 /* Counts and the privacy line, on every tab — the second is the most consequential

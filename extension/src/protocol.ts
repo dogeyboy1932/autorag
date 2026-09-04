@@ -95,7 +95,7 @@ export type Request =
    * authenticates to a different system, and making them match means changing one
    * silently breaks the other.
    */
-  | { kind: 'attachProject'; url: string; anonKey: string; password: string; create: boolean }
+  | { kind: 'attachProject'; url: string; anonKey: string; password: string; create: boolean; email?: string }
   | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean }
   /** Every session this person can reach: their own, invited, and open ones. */
   | { kind: 'listSessions'; cloud: CloudSettings }

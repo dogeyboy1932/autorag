@@ -303,17 +303,28 @@ async function handle(request: Request): Promise<unknown> {
      */
     case 'attachProject': {
       const cfg = { url: request.url, anonKey: request.anonKey };
-      const email = (await cloudSettings())?.email ?? '';
-      if (!email) throw new Error('Sign in first — a project is attached to an account.');
+      /*
+       * The project's login, which need not be the account's address. Falls back
+       * to the account email, which is right for almost everybody.
+       */
+      const account = await storage.get<CloudSettings>('cloud');
+      const email = request.email?.trim() || account?.email || '';
+      if (!email) throw new Error('Sign in on the web app first — a project is attached to an account.');
       const project = request.create
         ? await signUp(cfg, email, request.password)
         : await signIn(cfg, email, request.password);
 
-      const dir = (await storage.get<CloudSettings>('cloud'))?.directory;
+      const dir = account?.directory;
       if (dir) {
+        /*
+         * The profile records the *account* email, never the project login.
+         * Invites are matched against the account address, so writing the other
+         * one here would land an invitation somewhere the invitee never looks.
+         */
+        const accountEmail = account?.email || email;
         await publishProfile(
-          { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email, userId: dir.userId },
-          { userId: dir.userId, email, cloud: cfg },
+          { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email: accountEmail, userId: dir.userId },
+          { userId: dir.userId, email: accountEmail, cloud: cfg },
         );
       }
       record('done', `Attached ${new URL(cfg.url).host}`);
