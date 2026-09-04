@@ -26,6 +26,7 @@ import {
   PREVIEW_SELECTION,
   envelope,
   type AskSettings,
+  type AccountState,
   type CloudSettings,
   type Event,
   type Preview,
@@ -1528,13 +1529,92 @@ function Recall({ settings }: { settings: AskSettings }) {
  * which is what makes signing into two different accounts impossible rather than
  * merely discouraged.
  */
+/**
+ * Who is signed in, according to the web app.
+ *
+ * ## Why this polls
+ *
+ * Identity is created in the web app and pushed here, but the push only fires when
+ * the app is open and something changes. Somebody who opens the panel, finds they
+ * are signed out, signs in on the app and comes back must not be looking at a
+ * stale "sign in first" screen — so this asks again on a timer, and stops asking
+ * once there is an answer. Two seconds is fast enough that the panel has caught up
+ * before you have finished switching tabs.
+ *
+ * The button opens the app rather than explaining where to find it. "Sign in on
+ * the web app" with no way to get there is a dead end, and the panel already knows
+ * the URL.
+ *
+ * There is deliberately no account form here. Identity is created in one place, and
+ * that is what makes being signed into two different accounts impossible rather
+ * than merely discouraged.
+ */
+const APP_URL = 'https://autorag-web.netlify.app/';
+
+function AccountGate({ account, onRecheck }: { account: AccountState | null; onRecheck: () => void }) {
+  if (account) {
+    return (
+      <p className="note">
+        Signed in as <strong>{account.demo ? 'demo account' : account.email || 'guest'}</strong>
+        {account.host ? ` · in ${account.host.name}` : account.sessionId ? ` · ${account.sessionId}` : ''}
+      </p>
+    );
+  }
+  return (
+    <div className="card">
+      <p className="note">
+        Sign in on the web app and this panel picks it up automatically — there is no separate
+        account here, on purpose.
+      </p>
+      <div className="row">
+        <button className="primary" onClick={() => void chrome.tabs.create({ url: APP_URL })}>
+          Open the web app
+        </button>
+        <button onClick={onRecheck}>Check again</button>
+      </div>
+    </div>
+  );
+}
+
+/** Reads the mirrored account, and keeps asking until there is one. */
+function useAccount(): [AccountState | null, () => void] {
+  const [account, setAccount] = useState<AccountState | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    const read = async () => {
+      const a = await ask<AccountState | null>({ kind: 'getAccount' });
+      if (live) setAccount(a);
+      return a;
+    };
+    void read();
+    /*
+     * Only while signed out. Once an account is here, polling buys nothing and
+     * would wake the offscreen document every two seconds for the life of the
+     * panel.
+     */
+    const timer = setInterval(async () => {
+      if (await read()) clearInterval(timer);
+    }, 2000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [nonce]);
+
+  return [account, () => setNonce((n) => n + 1)];
+}
+
 function PanelSessions({
   cloud,
   save,
+  account,
   onChanged,
 }: {
   cloud: CloudSettings;
   save: (next: CloudSettings) => void;
+  account: AccountState | null;
   onChanged: () => void;
 }) {
   const api: SessionsApi = useMemo(
@@ -1588,7 +1668,7 @@ function PanelSessions({
       activeSessionId={cloud.sessionId ?? PERSONAL}
       hostedName={cloud.host?.name}
       canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
-      signedIn={Boolean(cloud.directory)}
+      signedIn={Boolean(account?.directory)}
       onChanged={onChanged}
     />
   );
@@ -1618,6 +1698,7 @@ function SyncStatus() {
 }
 
 function App() {
+  const [account, recheckAccount] = useAccount();
   const [tab, setTab] = useState<Tab>('library');
   const [pending, setPending] = useState<Pending[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -1701,9 +1782,16 @@ function App() {
       <div className={tab === 'settings' ? 'pane' : 'pane off'}>
         <AnswerSettings settings={settings} save={saveSettings} />
         <hr />
+        <section>
+          <h2>
+            Account <span className="soft">created on the web app</span>
+          </h2>
+          <AccountGate account={account} onRecheck={recheckAccount} />
+        </section>
+        <hr />
         <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
         <hr />
-        <PanelSessions cloud={cloud} save={saveCloud} onChanged={refresh} />
+        <PanelSessions cloud={cloud} save={saveCloud} account={account} onChanged={refresh} />
         <hr />
         <Activity />
       </div>

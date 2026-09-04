@@ -70,12 +70,13 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
   /*
    * Passages already in this browser, kept before anyone signed in.
    *
-   * They do not need migrating — they live in IndexedDB tagged `personal` and stay
-   * there whoever signs in next, so carrying them over is the default rather than
-   * a feature. What matters is saying so, for two opposite reasons: a guest who
-   * signs up should know their work is not being thrown away, and someone signing
-   * in on a **shared machine** should know they are about to inherit a stranger's
-   * notes, and be given the one button that prevents it.
+   * They need no migrating — they live in IndexedDB tagged `personal` and stay
+   * there when you sign in, so a guest who makes an account keeps everything and
+   * it syncs up the moment a project is attached. Worth saying out loud only so
+   * nobody hesitates to sign up for fear of losing what they kept.
+   *
+   * Clearing is offered because someone may genuinely want a clean start, not as
+   * a warning about anything.
    */
   const [kept, setKept] = useState<number | null>(null);
   useEffect(() => {
@@ -257,9 +258,9 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
           }
         >
           <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
-            {kept} passage{kept === 1 ? '' : 's'} kept here without an account. They stay with
-            whichever account signs in next and sync once a project is attached. If this is not
-            your machine, or they are not yours, clear them first.
+            {kept} passage{kept === 1 ? '' : 's'} already kept in this browser. Signing in keeps
+            all of them — they come with you, and sync up once you attach a project. Clear them
+            only if you want to start over.
           </p>
         </Panel>
       )}
