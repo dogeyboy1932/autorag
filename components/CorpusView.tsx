@@ -4,15 +4,15 @@ import { useCallback, useState, type ReactNode } from 'react';
 import type { Chunk, Source } from '@/src/types';
 import { allChunks, allSources, deleteSourceCascade, setSourceStale } from '@/src/rag/store';
 import { useCorpusData } from '@/src/rag/hooks';
-import { Button, Empty, Panel, Pill } from './ui';
+import { Button, Empty, Field, Panel, Pill } from './ui';
 
 /**
- * The corpus, by source. Mirrors `autorag_list_sources`, `autorag_mark_stale`
- * and `autorag_forget_source` so a human can do anything an agent can.
+ * The corpus, by source. Mirrors `autorag_list_sources`, `autorag_mark_stale` and
+ * `autorag_forget_source`, so a human can do anything an agent can.
  *
  * Forgetting is the only irreversible action in the app and there is no
- * browser-mediated confirmation to lean on (API-DELTA D4), so it asks twice
- * here, exactly as the tool requires `confirm: true`.
+ * browser-mediated confirmation to lean on (API-DELTA D4), so it asks twice here —
+ * exactly as the tool requires `confirm: true`.
  */
 export default function CorpusView({ sync }: { sync?: ReactNode }) {
   const load = useCallback(async (): Promise<{ sources: Source[]; chunks: Chunk[] }> => {
@@ -41,118 +41,82 @@ export default function CorpusView({ sync }: { sync?: ReactNode }) {
 
   return (
     <Panel
-      title="Corpus"
+      title="What you have kept"
       right={
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+        <span className="row">
           {sync}
           <Pill tone="mute">{sources.length} sources</Pill>
         </span>
       }
     >
       {sources.length === 0 ? (
-        <Empty>Nothing ingested yet.</Empty>
+        <Empty>Nothing kept yet.</Empty>
       ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {sources.map((s) => {
-            const c = counts.get(s.id) ?? { approved: 0, pending: 0 };
-            return (
-              <div
-                key={s.id}
-                style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  padding: 10,
-                  background: 'var(--bg)',
-                  opacity: s.stale ? 0.72 : 1,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 10,
-                    flexWrap: 'wrap',
-                    alignItems: 'baseline',
-                  }}
-                >
-                  <a href={s.url} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>
-                    {s.title}
-                  </a>
-                  <span style={{ color: 'var(--muted)', fontSize: 11.5 }}>
-                    {c.approved} approved{c.pending > 0 && ` · ${c.pending} pending`} · ingested{' '}
-                    {new Date(s.ingestedAt).toLocaleDateString()}
-                  </span>
-                </div>
+        sources.map((s) => {
+          const c = counts.get(s.id) ?? { approved: 0, pending: 0 };
+          return (
+            <div className="card" key={s.id} style={{ opacity: s.stale ? 0.72 : 1 }}>
+              <div className="card-head">
+                <a className="card-title" href={s.url} target="_blank" rel="noreferrer">
+                  {s.title}
+                </a>
+                <span className="meta">
+                  {c.approved} kept{c.pending > 0 && ` · ${c.pending} to review`} ·{' '}
+                  {new Date(s.ingestedAt).toLocaleDateString()}
+                </span>
+              </div>
 
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+              {(s.stale || s.tags.length > 0) && (
+                <div className="row" style={{ marginBottom: 8 }}>
                   {s.stale && <Pill tone="warn">stale · demoted in ranking</Pill>}
                   {s.tags.map((t) => (
-                    <Pill key={t} tone="mute">
-                      {t}
-                    </Pill>
+                    <Pill key={t} tone="mute">{t}</Pill>
                   ))}
                 </div>
-                {s.stale && s.staleReason && (
-                  <p style={{ color: 'var(--muted)', fontSize: 12, margin: '6px 0 0' }}>
-                    {s.staleReason}
-                  </p>
-                )}
+              )}
+              {s.stale && s.staleReason && <p className="note">{s.staleReason}</p>}
 
-                {staling === s.id ? (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <input
-                      autoFocus
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      placeholder="Why is this outdated?"
-                      style={{
-                        flex: 1,
-                        background: 'var(--panel)',
-                        color: 'var(--fg)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 6,
-                        padding: '5px 8px',
-                        font: 'inherit',
-                        fontSize: 12.5,
-                      }}
-                    />
-                    <Button onClick={() => markStale(s.id)} tone="primary">
-                      Mark stale
-                    </Button>
-                    <Button onClick={() => setStaling(null)}>Cancel</Button>
-                  </div>
-                ) : confirming === s.id ? (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-                    <span style={{ color: 'var(--bad)', fontSize: 12 }}>
-                      Delete this source and {c.approved + c.pending} passage(s) permanently?
-                    </span>
-                    <Button
-                      onClick={async () => {
-                        await deleteSourceCascade(s.id);
-                        setConfirming(null);
-                      }}
-                      tone="danger"
-                    >
-                      Yes, forget it
-                    </Button>
-                    <Button onClick={() => setConfirming(null)}>Cancel</Button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                    {s.stale ? (
-                      <Button onClick={() => setSourceStale(s.id, false)}>Clear stale flag</Button>
-                    ) : (
-                      <Button onClick={() => setStaling(s.id)}>Mark stale</Button>
-                    )}
-                    <Button onClick={() => setConfirming(s.id)} tone="danger">
-                      Forget
-                    </Button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              {staling === s.id ? (
+                <div className="card-actions">
+                  <Field
+                    autoFocus
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Why is this outdated?"
+                  />
+                  <Button onClick={() => void markStale(s.id)} tone="primary" small>Mark stale</Button>
+                  <Button onClick={() => setStaling(null)} small>Cancel</Button>
+                </div>
+              ) : confirming === s.id ? (
+                <div className="card-actions">
+                  <span className="note bad">
+                    Delete this source and {c.approved + c.pending} passage(s) permanently?
+                  </span>
+                  <Button
+                    tone="danger"
+                    small
+                    onClick={async () => {
+                      await deleteSourceCascade(s.id);
+                      setConfirming(null);
+                    }}
+                  >
+                    Yes, forget it
+                  </Button>
+                  <Button onClick={() => setConfirming(null)} small>Cancel</Button>
+                </div>
+              ) : (
+                <div className="card-actions">
+                  {s.stale ? (
+                    <Button onClick={() => void setSourceStale(s.id, false)} small>Clear stale flag</Button>
+                  ) : (
+                    <Button onClick={() => setStaling(s.id)} small>Mark stale</Button>
+                  )}
+                  <Button onClick={() => setConfirming(s.id)} tone="danger" small>Forget</Button>
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
     </Panel>
   );

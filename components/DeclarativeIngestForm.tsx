@@ -5,7 +5,7 @@ import { ingestPassage } from '@/src/rag/ingest';
 import { summarizeConflicts } from '@/src/rag/screen';
 import { fail } from '@/src/webmcp/errors';
 import { recordActivity, toCallToolResult } from '@/src/webmcp/registry';
-import { Panel, Pill } from './ui';
+import { Fold } from './ui';
 
 /**
  * The declarative WebMCP API: a plain HTML <form> annotated so the browser
@@ -120,19 +120,23 @@ export default function DeclarativeIngestForm() {
 
   const field: React.CSSProperties = {
     width: '100%',
-    background: 'var(--bg)',
+    background: 'rgba(0, 0, 0, .18)',
     color: 'var(--fg)',
     border: '1px solid var(--border)',
-    borderRadius: 6,
-    padding: '7px 9px',
+    borderRadius: 'var(--radius-sm)',
+    padding: '9px 11px',
     font: 'inherit',
-    fontSize: 13,
   };
-  const label: React.CSSProperties = { fontSize: 12, color: 'var(--muted)', display: 'block', marginBottom: 3 };
+  const label: React.CSSProperties = {
+    fontSize: 'var(--text-sm)',
+    color: 'var(--muted)',
+    display: 'block',
+    marginBottom: 4,
+  };
 
   return (
-    <Panel title="Declarative API" right={<Pill tone="mute">form-derived tool</Pill>}>
-      <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '0 0 10px' }}>
+    <Fold title="Declarative API" status="form-derived tool">
+      <p className="note">
         The same ingest capability exposed the other way: an annotated HTML form the
         browser turns into a tool on its own, with no registration code.
       </p>
@@ -192,22 +196,13 @@ export default function DeclarativeIngestForm() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button
             type="submit"
-            style={{
-              background: 'rgba(68,147,248,.15)',
-              color: 'var(--accent)',
-              border: '1px solid rgba(68,147,248,.4)',
-              borderRadius: 6,
-              padding: '5px 11px',
-              font: 'inherit',
-              fontSize: 12.5,
-              cursor: 'pointer',
-            }}
+            className="btn primary"
           >
             Submit via form
           </button>
-          {note && <span style={{ color: 'var(--muted)', fontSize: 12.5 }}>{note}</span>}
+          {note && <span className="note">{note}</span>}
         </div>
       </form>
-    </Panel>
+    </Fold>
   );
 }

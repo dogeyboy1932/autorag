@@ -25,10 +25,39 @@
  * withhold" as separate failures, and `coverageNote()` reports signals rather than
  * verdicts. This prompt is the same rule, applied to prose.
  *
+ * ## Why this is in `src/rag/` and not in the extension
+ *
+ * It began in `extension/src/offscreen/answer.ts`, back when the panel was the only
+ * surface that could answer anything. The web app now answers too, and a second
+ * copy of this file would have been two grounding prompts, two citation contracts
+ * and two places for them to drift — while the whole claim of the product is that
+ * an answer can be checked against the passages under it. One prompt, both
+ * surfaces.
+ *
+ * It moved unchanged because it could: there is not a single `chrome.*` call in
+ * here. The only thing that differs between the two callers is *whose key pays*,
+ * and that is the transport below.
+ *
+ * ## Two transports, and why the second one exists
+ *
+ * With a key, this streams straight to `api.anthropic.com`. That is the extension's
+ * only mode and the web app's preferred one: the person's key, the person's spend,
+ * the person's conversation.
+ *
+ * Without a key, the web app can still answer through `proxyEndpoint` — a Netlify
+ * Function holding the author's key, capped per visitor. A static export has
+ * nowhere to keep a secret, so this is the only way somebody who has just landed on
+ * the site can try the thing before deciding to sign up for an API account.
+ *
+ * The proxy does not stream and cannot be sent `thinking` or `output_config`. It is
+ * a different shape of request, not a different function, so the branch is here
+ * rather than in a parallel implementation.
+ *
  * ## Why `fetch` and not the SDK
  *
- * `@anthropic-ai/sdk` is shaped for Node and bundlers; this is an MV3 offscreen
- * document. One `fetch` has no polyfill surface and nothing to go stale.
+ * `@anthropic-ai/sdk` is shaped for Node and bundlers; this runs in an MV3
+ * offscreen document and in a page. One `fetch` has no polyfill surface and
+ * nothing to go stale.
  *
  * **CORS is in the way, and the header is required.** The API refuses a browser
  * request without `anthropic-dangerous-direct-browser-access: true`:
@@ -49,10 +78,70 @@
  * storage. That is the same bar the extension already accepts for it.
  */
 
-import { ASK_MODELS, type AskSettings, type AskTurn } from '../protocol';
+import { ASK_MODELS, type AskSettings, type AskTurn } from './ask';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
+
+/**
+ * Which way this request goes out.
+ *
+ * `direct` is the real thing: streaming, adaptive thinking, the caller's own key.
+ * `proxy` is what a visitor with no key gets — one JSON response from a server that
+ * holds somebody else's key and counts what it spends.
+ */
+type Transport =
+  | { mode: 'direct'; apiKey: string }
+  | { mode: 'proxy'; endpoint: string };
+
+function transportFor(settings: AskSettings): Transport {
+  if (settings.apiKey) return { mode: 'direct', apiKey: settings.apiKey };
+  if (settings.proxyEndpoint) return { mode: 'proxy', endpoint: settings.proxyEndpoint };
+  throw new Error('No API key set. Add one in Settings → Answers.');
+}
+
+const directHeaders = (apiKey: string) => ({
+  'content-type': 'application/json',
+  'x-api-key': apiKey,
+  'anthropic-version': API_VERSION,
+  /*
+   * Required, and the name is accurate about what it permits rather than about the
+   * risk. The API refuses a browser request without it:
+   *
+   *     CORS requests must set 'anthropic-dangerous-direct-browser-access' header
+   */
+  'anthropic-dangerous-direct-browser-access': 'true',
+});
+
+/** How many demo answers this visitor has spent, as the proxy reports it. */
+export interface DemoUsage {
+  used: number;
+  limit: number;
+}
+
+const demoUsageOf = (res: Response): DemoUsage | undefined => {
+  const used = res.headers.get('x-autorag-demo-used');
+  const limit = res.headers.get('x-autorag-demo-limit');
+  return used && limit ? { used: Number(used), limit: Number(limit) } : undefined;
+};
+
+/**
+ * The provider's own words for a failure, rather than a sentence invented for it.
+ *
+ * A 401 and a 429 need completely different reactions from the person reading them,
+ * and "the request failed" tells them which one it was: neither.
+ */
+async function detailOf(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { message?: string } | string };
+    const err = body?.error;
+    const message = typeof err === 'string' ? err : err?.message;
+    if (message) return message;
+  } catch {
+    /* keep the status */
+  }
+  return `HTTP ${res.status}`;
+}
 
 export interface Passage {
   text: string;
@@ -220,14 +309,16 @@ async function standaloneQuery(
 ): Promise<string> {
   if (history.length === 0) return question;
   try {
+    const transport = transportFor(settings);
+    /*
+     * On the proxy this would cost the visitor one of their ten answers, which is a
+     * poor trade for expanding a pronoun. So follow-ups there retrieve on the raw
+     * question — slightly worse retrieval, ten real answers instead of five.
+     */
+    if (transport.mode === 'proxy') return question;
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': settings.apiKey,
-        'anthropic-version': API_VERSION,
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers: directHeaders(transport.apiKey),
       body: JSON.stringify({
         model: 'claude-haiku-4-5',
         max_tokens: 100,
@@ -267,21 +358,64 @@ export async function askModel(
   history: AskTurn[] = [],
   onUsage?: (tokens: { input: number; output: number }) => void,
   signal?: AbortSignal,
-): Promise<{ imagesSent: number }> {
-  if (!settings.apiKey) throw new Error('No API key set. Add one in the panel’s Settings.');
+): Promise<{ imagesSent: number; demo?: DemoUsage }> {
+  const transport = transportFor(settings);
 
   const content = await userTurn(question, passages, confidence, coverageNote);
   const imagesSent = content.filter((b) => b.type === 'image').length;
 
+  /*
+   * The proxy path: one request, one answer, no stream.
+   *
+   * It deliberately sends the plain body only. `netlify/functions/ask.ts` forwards
+   * `system`, `model` and `messages` and nothing else — it also caps `max_tokens`
+   * itself, which is the point of it — so `stream`, `thinking` and `output_config`
+   * would be silently dropped rather than honoured. Sending them would suggest a
+   * request that is not what actually goes upstream.
+   *
+   * `onText` is still called, once, with the whole answer. Every caller then has
+   * one code path for rendering, and the only observable difference is that the
+   * words arrive together instead of arriving as they are written.
+   */
+  if (transport.mode === 'proxy') {
+    const res = await fetch(transport.endpoint, {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: settings.model, system: SYSTEM, messages: [...history, { role: 'user', content }] }),
+    });
+    if (!res.ok) {
+      /*
+       * A 404 here is not a failed answer, it is a missing endpoint — the demo
+       * function is not deployed on whatever is serving this page. That is the
+       * normal case on a dev server, where `next dev` serves the static export and
+       * nothing serves `/.netlify/functions/`, and `HTTP 404` sends the reader
+       * looking for a bug in their question.
+       */
+      if (res.status === 404) {
+        throw new Error(
+          'No answering service is running here, so Ask has nowhere to go. Add your own Anthropic key in Settings → Answers — Search works either way, and stays local.',
+        );
+      }
+      throw new Error(await detailOf(res));
+    }
+    const body = (await res.json()) as {
+      content?: { type: string; text?: string }[];
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
+    const text = body.content?.find((b) => b.type === 'text')?.text ?? '';
+    if (!text) throw new Error('The answering service returned no text.');
+    onText(text);
+    if (body.usage) {
+      onUsage?.({ input: body.usage.input_tokens ?? 0, output: body.usage.output_tokens ?? 0 });
+    }
+    return { imagesSent, demo: demoUsageOf(res) };
+  }
+
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     signal,
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': settings.apiKey,
-      'anthropic-version': API_VERSION,
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
+    headers: directHeaders(transport.apiKey),
     body: JSON.stringify({
       model: settings.model,
       /*
@@ -329,18 +463,7 @@ export async function askModel(
     }),
   });
 
-  if (!response.ok || !response.body) {
-    // Read the provider's own words rather than inventing a sentence for them: a
-    // 401 and a 429 need completely different reactions from the person reading it.
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = (await response.json()) as { error?: { message?: string } };
-      if (body?.error?.message) detail = body.error.message;
-    } catch {
-      /* keep the status */
-    }
-    throw new Error(detail);
-  }
+  if (!response.ok || !response.body) throw new Error(await detailOf(response));
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

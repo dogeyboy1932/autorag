@@ -30,7 +30,7 @@ import {
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
 import { isEnvelope, type CloudSettings, type Event, type Request, type Response } from '../protocol';
-import { askModel, standaloneQuery } from './answer';
+import { askModel, standaloneQuery } from '@/src/rag/answer';
 import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
 import {
   directoryConfigured,

@@ -369,3 +369,30 @@ ul.sessions code {
   opacity: 0.65;
   font-size: 11px;
 }
+
+/* --------------------------------------------------------------- sessions --
+ * `components/Sessions.tsx` is shared with the web app, so the classes it emits
+ * have to mean the same thing in both stylesheets. Kept in step with the block of
+ * the same name in `app/globals.css`; if you change one, change the other.
+ */
+.session-list { display: grid; gap: 4px; margin: 10px 0; }
+.session-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 8px 11px; text-align: left; cursor: pointer;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; min-height: 34px;
+}
+.session-row:hover:not(:disabled) { border-color: var(--muted); background: var(--panel-2); }
+.session-row.on { border-color: var(--accent); background: rgba(142, 214, 111, .07); cursor: default; opacity: 1; }
+.session-row:disabled { opacity: 1; }
+.session-name { font-weight: 600; }
+.session-cta { margin-left: auto; color: var(--muted); font-size: 12px; }
+.session-row.on .session-cta { color: var(--accent); }
+
+.check { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; margin-top: 8px; }
+.check input { margin-top: 3px; flex: none; }
+
+/* The shared `Fold` wraps its contents; the panel's own folds do not. */
+.fold-body { display: grid; gap: 10px; }
+.btn.small { padding: 4px 9px; font-size: 12px; }

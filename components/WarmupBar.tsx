@@ -21,7 +21,7 @@ export default function WarmupBar() {
   const pct = state.progress === null ? null : Math.round(state.progress * 100);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+    <span className="row">
       {state.phase === 'ready' && <Pill tone="ok">model ready · {state.backend}</Pill>}
       {state.phase === 'loading' && (
         <Pill tone="warn">
@@ -30,6 +30,6 @@ export default function WarmupBar() {
       )}
       {state.phase === 'failed' && <Pill tone="bad">embeddings unavailable</Pill>}
       {state.phase === 'idle' && <Pill tone="mute">starting…</Pill>}
-    </div>
+    </span>
   );
 }

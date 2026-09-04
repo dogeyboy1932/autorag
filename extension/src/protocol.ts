@@ -16,6 +16,12 @@
  * same memory the side panel is showing.
  */
 
+/*
+ * Imported as well as re-exported below: `export … from` forwards a name without
+ * binding it locally, and the `ask` request in this very union refers to both.
+ */
+import type { AskSettings, AskTurn } from '@/src/rag/ask';
+
 export type Request =
   | { kind: 'ingest'; text: string; sourceUrl: string; title: string; tags?: string[] }
   | { kind: 'dryRun'; text: string; sourceUrl: string }
@@ -183,35 +189,21 @@ export interface CloudSettings {
   sessionId?: string;
 }
 
-/** Where the answering model lives and what it costs. Stored in chrome.storage.local. */
-export interface AskSettings {
-  apiKey: string;
-  model: string;
-}
-
-export interface AskTurn {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 /**
- * The models the panel offers, with what they cost, because Ask is the first thing
- * in Autorag that spends money and a price nobody can see is a price nobody agreed to.
+ * Where the answering model lives and what it costs. Stored in chrome.storage.local.
+ *
+ * Defined in `src/rag/ask.ts` and re-exported here rather than declared twice. The
+ * web app answers questions too now, and it has no business importing the
+ * extension's message vocabulary to find out what Opus costs — but this file is
+ * still the one place to read to learn everything the extension speaks, so the
+ * names stay reachable from it.
  */
-export const ASK_MODELS = [
-  /*
-   * `adaptive` marks the models that take `thinking: {type:'adaptive'}` and
-   * `output_config.effort`. Haiku 4.5 predates both: adaptive thinking is not a
-   * mode it has, and `effort` is rejected outright. Sending them anyway made every
-   * Haiku answer fail — a picker that offers a model and then speaks to it in a
-   * dialect it does not understand.
-   */
-  { id: 'claude-opus-5', label: 'Opus 5', input: 5, output: 25, adaptive: true },
-  { id: 'claude-sonnet-5', label: 'Sonnet 5', input: 2, output: 10, adaptive: true },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', input: 1, output: 5, adaptive: false },
-] as const;
-
-export const DEFAULT_ASK_MODEL = 'claude-opus-5';
+export {
+  ASK_MODELS,
+  DEFAULT_ASK_MODEL,
+  type AskSettings,
+  type AskTurn,
+} from '@/src/rag/ask';
 
 /** Panel ← offscreen, as the answer is written. */
 export const ASK_DELTA = 'autorag:ask-delta';

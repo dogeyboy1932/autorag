@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button, Panel } from '@/components/ui';
+import { Button, Field, Panel } from '@/components/ui';
 import {
   directoryConfigured,
   listOpenSessions,
@@ -181,29 +181,27 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
       </div>
 
       <Panel title={mode === 'in' ? 'Sign in' : 'Create an account'}>
-        <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--muted)' }}>
+        <p className="note">
           An email and a password. You do <strong>not</strong> need a Supabase project — that
           is only for hosting a corpus of your own, and you can add it later.
         </p>
         <div className="auth-form">
           <label className="auth-label" htmlFor="auth-email">Email</label>
-          <input
+          <Field
             id="auth-email"
             placeholder="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="auth-field"
           />
           <label className="auth-label" htmlFor="auth-password">Password</label>
-          <input
+          <Field
             id="auth-password"
             type="password"
             placeholder="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="auth-field"
           />
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="row">
             <Button
               tone="primary"
               disabled={!configured || !email.trim() || !password || busy !== null}
@@ -212,8 +210,8 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
               {mode === 'in' ? 'Sign in' : 'Create account'}
             </Button>
             <button
+              className="linky"
               onClick={() => setMode(mode === 'in' ? 'up' : 'in')}
-              style={linky}
               disabled={busy !== null}
             >
               {mode === 'in' ? 'or create one' : 'or sign in'}
@@ -231,7 +229,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
             </Button>
           }
         >
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+          <p className="note">
             No signup. Borrows a real shared corpus so you can search it, review what is
             pending, and ask it questions. It is shared and writable — what you remove goes
             for the next visitor too.
@@ -249,7 +247,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
             </Button>
           }
         >
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+          <p className="note">
             Everything stays in this browser. You can keep, review, search and ask — but not
             join sessions or sync anywhere, since both need an account. You can make one
             later and bring what you kept with you.
@@ -273,7 +271,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
             </Button>
           }
         >
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)' }}>
+          <p className="note">
             {kept} passage{kept === 1 ? '' : 's'} already kept in this browser. Signing in keeps
             all of them — they come with you, and sync up once you attach a project. Clear them
             only if you want to start over.
@@ -281,10 +279,10 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
         </Panel>
       )}
 
-      {busy && <p style={note}>{busy}</p>}
-      {msg && <p style={{ ...note, color: 'var(--bad)' }}>{msg}</p>}
+      {busy && <p className="note">{busy}</p>}
+      {msg && <p className="note bad">{msg}</p>}
       {!configured && (
-        <p style={{ ...note, color: 'var(--bad)' }}>
+        <p className="note bad">
           This build has no directory configured, so accounts and demo mode are unavailable.
           Guest mode still works.
         </p>
@@ -292,23 +290,3 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
     </main>
   );
 }
-
-const field: React.CSSProperties = {
-  padding: '7px 9px',
-  borderRadius: 6,
-  border: '1px solid var(--border)',
-  background: 'transparent',
-  color: 'var(--fg)',
-  fontSize: 13,
-};
-
-const linky: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: 'var(--accent)',
-  fontSize: 12,
-  cursor: 'pointer',
-  padding: 0,
-};
-
-const note: React.CSSProperties = { margin: '12px 0 0', fontSize: 12, color: 'var(--muted)' };

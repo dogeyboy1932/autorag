@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { onActivity, type ActivityEntry } from '@/src/webmcp/registry';
-import { Empty, Panel, Pill } from './ui';
+import { Empty, Fold, Pill } from './ui';
 
 /**
- * Live feed of agent tool calls. Makes the agent's work visible while it
- * happens — without this, an agent filling the review queue looks like the page
- * changing on its own.
+ * Live feed of agent tool calls. Makes the agent's work visible while it happens —
+ * without this, an agent filling the review queue looks like the page changing on
+ * its own.
  */
 export default function ActivityLog() {
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
@@ -26,25 +26,20 @@ export default function ActivityLog() {
     phase === 'failed' ? 'bad' : phase === 'called' ? 'warn' : 'ok';
 
   return (
-    <Panel title="Agent activity" right={<Pill tone="mute">{entries.length} events</Pill>}>
+    <Fold title="Agent activity" status={entries.length ? `${entries.length} events` : 'quiet'}>
       {entries.length === 0 ? (
         <Empty>No agent calls yet. Every tool call an agent makes shows up here.</Empty>
       ) : (
-        <div style={{ display: 'grid', gap: 4, maxHeight: 260, overflowY: 'auto' }}>
+        <div className="stack" style={{ maxHeight: 300, overflowY: 'auto' }}>
           {entries.map((e, i) => (
-            <div
-              key={i}
-              style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 12 }}
-            >
-              <span style={{ color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-                {new Date(e.at).toLocaleTimeString()}
-              </span>
+            <div className="row" key={i}>
+              <span className="meta">{new Date(e.at).toLocaleTimeString()}</span>
               <Pill tone={tone(e.phase)}>{e.phase}</Pill>
-              <code style={{ color: 'var(--fg)' }}>{e.tool}</code>
+              <code>{e.tool}</code>
             </div>
           ))}
         </div>
       )}
-    </Panel>
+    </Fold>
   );
 }

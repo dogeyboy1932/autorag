@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Panel } from '@/components/ui';
+import { Button, Field, Fold, TextArea } from '@/components/ui';
 import { useAccount } from '@/components/Shell';
 import { publishProfile } from '@/src/rag/directory';
 import { SCHEMA_SQL, signIn, signUp } from '@/src/rag/sync';
@@ -42,22 +42,17 @@ export default function AttachProject() {
 
   if (account.project) {
     return (
-      <Panel
-        title="Your project"
-        right={
-          <Button
-            tone="danger"
-            onClick={() => save({ ...account, project: undefined })}
-          >
-            Detach
-          </Button>
-        }
-      >
-        <p style={note}>
+      <Fold title="Host your own memory" status={new URL(account.project.url).host}>
+        <p className="note">
           Hosting your corpus at <code>{new URL(account.project.url).host}</code>. Sessions you
           create live here.
         </p>
-      </Panel>
+        <div className="row">
+          <Button tone="danger" onClick={() => save({ ...account, project: undefined })}>
+            Detach
+          </Button>
+        </div>
+      </Fold>
     );
   }
 
@@ -74,11 +69,10 @@ export default function AttachProject() {
       const dir = account!.directory!;
       /*
        * Published here rather than at sign-in, because this is the first moment
-       * there is anything true to say. Without a profile row, a session this
-       * person hosts resolves to nothing for everyone they hand the code to — and
-       * they would have no way to see that from their own side.
-       */
-      /*
+       * there is anything true to say. Without a profile row, a session this person
+       * hosts resolves to nothing for everyone they hand the code to — and they
+       * would have no way to see that from their own side.
+       *
        * The profile records the *account* email, not whatever address the project
        * happens to be signed in under. Invites are matched against the account
        * email, so writing the project one here would make an invitation land on an
@@ -107,26 +101,27 @@ export default function AttachProject() {
   }
 
   return (
-    <Panel title="Host your own memory (optional)">
-      <p style={note}>
-        Only needed to <strong>create</strong> a session or sync across devices. Joining someone
-        else&rsquo;s session needs nothing. Your passages stay in a database you own.
+    <Fold title="Host your own memory" status="optional">
+      <p className="note">
+        Only needed to <strong>create</strong> a session, or to sync across devices. Joining
+        someone else&rsquo;s session needs nothing at all. Your passages stay in a database you
+        own — this app never sees it.
       </p>
 
-      {showSql && (
-        <>
-          <p style={note}>
+      <details className="fold" open={showSql} onToggle={(e) => setShowSql(e.currentTarget.open)}>
+        <summary>
+          First-time setup <span className="soft">three steps</span>
+        </summary>
+        <div className="fold-body">
+          <p className="note">
             <strong>1.</strong> In Supabase → SQL editor, run the script below.{' '}
             <strong>2.</strong> Authentication → Sign In / Providers → Email → turn off{' '}
-            <strong>Confirm email</strong>. <strong>3.</strong> Use <em>Create</em> below with a
-            password for the project — it does not have to match your account password.
+            <strong>Confirm email</strong>; there is nowhere for a confirmation link to land.{' '}
+            <strong>3.</strong> Use <em>Create</em> below with a password for the project — it
+            does not have to match your account password.
           </p>
-          <textarea
-            readOnly
-            value={SCHEMA_SQL}
-            style={{ ...field, height: 120, fontFamily: 'monospace', fontSize: 11, width: '100%' }}
-          />
-          <div style={row}>
+          <TextArea readOnly value={SCHEMA_SQL} rows={8} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 'var(--text-xs)' }} />
+          <div className="row">
             <Button
               onClick={() => {
                 void navigator.clipboard.writeText(SCHEMA_SQL).then(() => {
@@ -137,64 +132,39 @@ export default function AttachProject() {
             >
               {copied ? 'Copied' : 'Copy SQL'}
             </Button>
-            <button onClick={() => setShowSql(false)} style={linky}>
-              hide
-            </button>
           </div>
-        </>
-      )}
+        </div>
+      </details>
 
-      <div style={row}>
-        <input placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} style={field} />
-      </div>
-      <div style={row}>
-        <input
-          placeholder="email for this project"
-          value={projectEmail}
-          onChange={(e) => setProjectEmail(e.target.value)}
-          style={field}
-        />
-      </div>
-      <div style={row}>
-        <input placeholder="publishable key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} style={field} />
-      </div>
-      <div style={row}>
-        <input
-          type="password"
-          placeholder="project password (its own)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={field}
-        />
-      </div>
-      <div style={row}>
-        <Button tone="primary" disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()} onClick={() => void attach(true)}>
+      <Field placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
+      <Field
+        placeholder="email for this project"
+        value={projectEmail}
+        onChange={(e) => setProjectEmail(e.target.value)}
+      />
+      <Field placeholder="publishable key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} />
+      <Field
+        type="password"
+        placeholder="project password (its own)"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <div className="row">
+        <Button
+          tone="primary"
+          disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()}
+          onClick={() => void attach(true)}
+        >
           {busy === 'Creating…' ? '…' : 'Create'}
         </Button>
-        <Button disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()} onClick={() => void attach(false)}>
+        <Button
+          disabled={busy !== null || !url.trim() || !anonKey.trim() || !password || !projectEmail.trim()}
+          onClick={() => void attach(false)}
+        >
           {busy === 'Connecting…' ? '…' : 'Connect'}
         </Button>
       </div>
-      {msg && <p style={{ ...note, color: 'var(--bad)' }}>{msg}</p>}
-    </Panel>
+      {msg && <p className="note bad">{msg}</p>}
+    </Fold>
   );
 }
-
-const row: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 };
-const field: React.CSSProperties = {
-  flex: 1,
-  padding: '6px 8px',
-  borderRadius: 6,
-  border: '1px solid var(--border)',
-  background: 'transparent',
-  color: 'var(--fg)',
-  fontSize: 13,
-};
-const linky: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: 'var(--accent)',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-const note: React.CSSProperties = { margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' };

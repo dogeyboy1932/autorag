@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Panel } from '@/components/ui';
+import { Button, Field, Fold } from '@/components/ui';
 import { PERSONAL } from '@/src/rag/sessions';
 
 /**
@@ -96,12 +96,12 @@ export default function Sessions({
 
   if (!signedIn) {
     return (
-      <Panel title="Sessions">
-        <p style={note}>
+      <Fold title="Sessions" status="signed out">
+        <p className="note">
           A session lets several people share one memory. Sign in to create one or join
           someone else&rsquo;s — an account is all it takes, no Supabase project.
         </p>
-      </Panel>
+      </Fold>
     );
   }
 
@@ -120,54 +120,54 @@ export default function Sessions({
   }
 
   return (
-    <Panel
+    <Fold
       title="Sessions"
-      right={
-        <span style={{ fontSize: 12, color: hosted ? 'var(--bad)' : 'var(--muted)' }}>
-          {active === PERSONAL ? 'Personal — only you' : hosted ? `${hostedName} — someone else's` : active}
-        </span>
-      }
+      status={active === PERSONAL ? 'personal' : hosted ? `${hostedName} · shared` : active}
     >
       {hosted && (
-        <p style={{ ...note, color: 'var(--bad)' }}>
+        <p className="note bad">
           You are keeping into <strong>someone else&rsquo;s</strong> project. Everything you
           approve here is readable by everyone in this session.
         </p>
       )}
 
-      <div style={row}>
-        <Button
+      <div className="session-list">
+        <button
+          className={active === PERSONAL ? 'session-row on' : 'session-row'}
           disabled={active === PERSONAL || busy !== null}
           onClick={() => void go(null, 'Personal')}
         >
-          {active === PERSONAL ? 'In your personal memory' : 'Back to personal'}
-        </Button>
+          <span className="session-name">Personal</span>
+          <span className="note">only you</span>
+          <span className="session-cta">{active === PERSONAL ? 'current' : 'switch'}</span>
+        </button>
+
+        {list.map((x) => (
+          <button
+            key={x.code}
+            className={active === x.code ? 'session-row on' : 'session-row'}
+            disabled={active === x.code || busy !== null}
+            onClick={() => void go({ id: x.code }, x.name)}
+          >
+            <span className="session-name">{x.name}</span>
+            <code className="note">{x.code}</code>
+            <span className="session-cta">{active === x.code ? 'current' : 'switch'}</span>
+          </button>
+        ))}
       </div>
 
-      {list.length > 0 && (
-        <ul style={{ listStyle: 'none', margin: '10px 0', padding: 0, display: 'grid', gap: 4 }}>
-          {list.map((x) => (
-            <li key={x.code} style={item}>
-              <span>
-                {x.name} <code style={{ opacity: 0.6, fontSize: 11 }}>{x.code}</code>
-              </span>
-              <Button
-                disabled={active === x.code || busy !== null}
-                onClick={() => void go({ id: x.code }, x.name)}
-              >
-                {active === x.code ? 'current' : 'switch'}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div style={row}>
-        <input
-          placeholder="join by code"
+      {/*
+        Join by code, and the point of a code.
+        
+        An open session is already in the list above for anyone who can see it — so
+        a code is for the sessions that are *not* listed: the private ones, where
+        the code is the only way in. That is what makes it worth typing.
+      */}
+      <div className="row">
+        <Field
+          placeholder="join a private session by code"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
-          style={field}
         />
         <Button
           disabled={!code.trim() || busy !== null}
@@ -188,18 +188,20 @@ export default function Sessions({
           {busy === 'joining' ? '…' : 'Join'}
         </Button>
       </div>
-      <p style={note}>Joining needs only an account. You do not need a Supabase project.</p>
+      <p className="note">
+        Joining needs only an account — no Supabase project. A code is a bearer token: anyone
+        holding it can join, which is exactly why it works for a session that is not listed.
+      </p>
 
-      <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '12px 0' }} />
+      <hr />
 
       {canHost ? (
         <>
-          <div style={row}>
-            <input
+          <div className="row">
+            <Field
               placeholder="new session name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              style={field}
             />
             <Button
               tone="primary"
@@ -232,26 +234,24 @@ export default function Sessions({
             The one switch here that cannot quietly be taken back, so it is off by
             default and says what it does rather than being called "public".
           */}
-          <label style={{ ...note, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <label className="check">
             <input
               type="checkbox"
               checked={openJoin}
               onChange={(e) => setOpenJoin(e.target.checked)}
-              style={{ marginTop: 2 }}
             />
-            <span>
+            <span className="note">
               Open to anyone — no invite needed. For a public demo corpus; anyone who finds the
               directory can read and change it.
             </span>
           </label>
 
           {active !== PERSONAL && !hosted && (
-            <div style={{ ...row, marginTop: 8 }}>
-              <input
+            <div className="row">
+              <Field
                 placeholder="invite an email address"
                 value={invite}
                 onChange={(e) => setInvite(e.target.value)}
-                style={field}
               />
               <Button
                 disabled={!invite.trim() || busy !== null}
@@ -277,43 +277,22 @@ export default function Sessions({
       ) : (
         /*
          * Explained rather than hidden or disabled. A greyed-out Create with no
-         * reason next to it reads as broken; the actual answer — that hosting is
-         * the one thing needing a project of your own — is short and worth saying.
+         * reason next to it reads as broken; the actual answer — that hosting is the
+         * one thing needing a project of your own — is short and worth saying.
          */
-        <p style={note}>
+        <p className="note">
           To <strong>create</strong> a session you need your own Supabase project, because a
-          shared corpus has to live in a database somebody owns. Attach one under Memory.
-          Joining someone else&rsquo;s needs nothing.
+          shared corpus has to live in a database somebody owns. Attach one under{' '}
+          <strong>Host your own memory</strong>, at the foot of Settings. Joining someone
+          else&rsquo;s needs nothing.
         </p>
       )}
 
-      <p style={note}>
+      <p className="note">
         Everyone in a session reads every passage in it. An invite is safer than a code: a code
         is a bearer token, while an invite releases credentials only to the address you named.
       </p>
-      {msg && <p style={note}>{msg}</p>}
-    </Panel>
+      {msg && <p className="note">{msg}</p>}
+    </Fold>
   );
 }
-
-const row: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 };
-const field: React.CSSProperties = {
-  flex: 1,
-  padding: '6px 8px',
-  borderRadius: 6,
-  border: '1px solid var(--border)',
-  background: 'transparent',
-  color: 'var(--fg)',
-  fontSize: 13,
-};
-const item: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 8,
-  padding: '6px 8px',
-  border: '1px solid var(--border)',
-  borderRadius: 6,
-  fontSize: 12,
-};
-const note: React.CSSProperties = { margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' };

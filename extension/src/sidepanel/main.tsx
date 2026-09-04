@@ -1934,10 +1934,13 @@ function App() {
 
       <div className={tab === 'settings' ? 'pane' : 'pane off'}>
         <AnswerSettings settings={settings} save={saveSettings} />
-        <details className="fold settings-fold">
-          <summary>Sessions <span className="soft">{cloud.sessionId ?? PERSONAL}</span></summary>
-          <PanelSessions cloud={cloud} save={saveCloud} account={account} onChanged={refresh} />
-        </details>
+        {/*
+          No wrapper here. `components/Sessions.tsx` is shared with the web app and
+          now collapses itself, reporting the active session in its own summary —
+          wrapping it in a second `<details>` would nest one fold inside another and
+          make you click twice to reach the same thing.
+        */}
+        <PanelSessions cloud={cloud} save={saveCloud} account={account} onChanged={refresh} />
         <details className="fold settings-fold">
           <summary>Activity</summary>
           <Activity />

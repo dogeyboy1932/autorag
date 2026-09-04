@@ -2,6 +2,18 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
+/**
+ * The shared furniture, as classes rather than inline styles.
+ *
+ * These were inline `style` objects, and the cost showed up everywhere: a button's
+ * size was written into the component, so changing it meant finding every copy, and
+ * there were about sixty stray `fontSize` literals across `components/` because
+ * that was the only way to adjust anything. Inline styles also cannot express hover
+ * or focus, so nothing had either.
+ *
+ * The classes live in `app/globals.css` next to the type scale they use.
+ */
+
 export function Panel({
   title,
   right,
@@ -14,32 +26,49 @@ export function Panel({
   style?: CSSProperties;
 }) {
   return (
-    <section
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 14,
-        background: 'var(--panel)',
-        boxShadow: '0 10px 30px rgba(0, 0, 0, .12)',
-        overflow: 'hidden',
-        ...style,
-      }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          padding: '14px 16px',
-          background: 'rgba(255, 255, 255, .018)',
-          borderBottom: '1px solid var(--border)',
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: 0.2 }}>{title}</h2>
+    <section className="panel" style={style}>
+      <header className="panel-head">
+        <h2>{title}</h2>
         {right}
       </header>
-      <div style={{ padding: 16 }}>{children}</div>
+      <div className="panel-body">{children}</div>
     </section>
+  );
+}
+
+/**
+ * A section that collapses, and says what it holds while collapsed.
+ *
+ * `status` is the whole reason this exists rather than a bare `<details>`: a column
+ * of shut panels that report nothing is a filing cabinet you have to open one
+ * drawer at a time. With it, `Answers — Opus 5` and `Sessions — personal` are
+ * readable without a click.
+ */
+export function Fold({
+  title,
+  status,
+  children,
+  open,
+  onToggle,
+}: {
+  title: string;
+  status?: ReactNode;
+  children: ReactNode;
+  open?: boolean;
+  onToggle?: (open: boolean) => void;
+}) {
+  return (
+    <details
+      className="fold"
+      {...(open === undefined ? {} : { open })}
+      onToggle={(e) => onToggle?.(e.currentTarget.open)}
+    >
+      <summary>
+        {title}
+        {status !== undefined && <span className="soft">{status}</span>}
+      </summary>
+      <div className="fold-body">{children}</div>
+    </details>
   );
 }
 
@@ -49,61 +78,52 @@ export function Button({
   tone = 'default',
   disabled,
   title,
+  small,
+  type,
 }: {
   children: ReactNode;
   onClick?: () => void;
   tone?: 'default' | 'primary' | 'danger';
   disabled?: boolean;
   title?: string;
+  small?: boolean;
+  type?: 'button' | 'submit';
 }) {
-  const tones = {
-    default: { bg: 'rgba(255,255,255,.025)', fg: 'var(--fg)', bd: 'var(--border)' },
-    primary: { bg: 'var(--accent)', fg: '#14200f', bd: 'var(--accent)' },
-    danger: { bg: 'rgba(241,124,114,.12)', fg: 'var(--bad)', bd: 'rgba(241,124,114,.4)' },
-  }[tone];
+  const className = ['btn', tone === 'default' ? '' : tone, small ? 'small' : '']
+    .filter(Boolean)
+    .join(' ');
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        background: tones.bg,
-        color: tones.fg,
-        border: `1px solid ${tones.bd}`,
-        borderRadius: 8,
-        padding: '7px 12px',
-        fontWeight: 700,
-        font: 'inherit',
-        fontSize: 12.5,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.45 : 1,
-      }}
-    >
+    <button type={type ?? 'button'} className={className} onClick={onClick} disabled={disabled} title={title}>
       {children}
     </button>
   );
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>{children}</p>;
+  return <p className="empty">{children}</p>;
 }
 
-export function Pill({ children, tone }: { children: ReactNode; tone: 'ok' | 'warn' | 'bad' | 'mute' }) {
-  const color = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', mute: 'var(--muted)' }[tone];
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        fontSize: 11,
-        color,
-        border: `1px solid ${color}`,
-        borderRadius: 999,
-        padding: '1px 8px',
-        opacity: 0.9,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </span>
-  );
+export function Note({ children, tone }: { children: ReactNode; tone?: 'bad' }) {
+  return <p className={tone === 'bad' ? 'note bad' : 'note'}>{children}</p>;
+}
+
+export function Pill({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: 'ok' | 'warn' | 'bad' | 'mute' | 'solid';
+}) {
+  return <span className={`pill ${tone}`}>{children}</span>;
+}
+
+/** A text input carrying the shared field treatment. */
+export function Field(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const { className, ...rest } = props;
+  return <input {...rest} className={className ? `field ${className}` : 'field'} />;
+}
+
+export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const { className, ...rest } = props;
+  return <textarea {...rest} className={className ? `field ${className}` : 'field'} />;
 }

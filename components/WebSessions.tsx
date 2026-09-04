@@ -250,16 +250,8 @@ export function WebSyncButton() {
   }
 
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-      <span
-        style={{
-          display: 'inline-block',
-          width: 190,
-          color: 'var(--muted)',
-          fontSize: 12,
-          textAlign: 'right',
-        }}
-      >
+    <span className="row">
+      <span className="note" style={{ textAlign: 'right', maxWidth: 240 }}>
         {message ?? ''}
       </span>
       <Button tone="primary" disabled={busy} onClick={() => void sync()}>
