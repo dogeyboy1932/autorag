@@ -7,7 +7,8 @@ import {
   listOpenSessions,
   resolveSession,
   signInAnonymously,
-  signInOrUp,
+  accountSignIn,
+  accountSignUp,
 } from '@/src/rag/directory';
 import { syncNow } from '@/src/rag/sync';
 import { countByStatus, wipeAll } from '@/src/rag/store';
@@ -89,7 +90,12 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
     setBusy(mode === 'up' ? 'Creating your account…' : 'Signing in…');
     setMsg(null);
     try {
-      const account = await signInOrUp(email.trim(), password);
+      // Does what the button says. Guessing past a person's stated intent is what
+      // produced "User already registered" when the password was simply wrong.
+      const account =
+        mode === 'up'
+          ? await accountSignUp(email.trim(), password)
+          : await accountSignIn(email.trim(), password);
       onSignedIn({
         email: email.trim(),
         directory: {

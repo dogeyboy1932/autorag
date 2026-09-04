@@ -110,72 +110,74 @@ export async function signInAnonymously(): Promise<Session> {
 }
 
 /**
- * Signs in to the directory, creating the account if it is not there yet.
+ * Signing in and signing up, kept apart.
  *
- * A person has two accounts and should never be asked to think about it: one in
- * their own corpus project, which is what row-level security scopes their
- * passages by, and one here, which is what owns sessions and receives invites.
- * Auth users are per-project, so these are genuinely different users that happen
- * to share an email and password.
+ * These used to be one function that tried a password grant and fell back to
+ * creating an account whenever it failed — for any reason at all. So a wrong
+ * password did not report a wrong password: it went on to attempt a signup, which
+ * Supabase refused with "User already registered", and *that* was shown to the
+ * person. Told they were already registered while being refused entry, with the
+ * Sign in / Create account choice they had just made ignored.
  *
- * Try-then-create rather than asking which they want. Whether the directory
- * account exists is an artefact of whether they have used sessions before, which
- * is not something anyone can be expected to remember, and the failure for
- * guessing wrong is 'Invalid login credentials' — an error about a password that
- * was never wrong.
+ * Each verb now does one thing and reports its own failure. A person's stated
+ * intent is information, and guessing past it produced an error message about the
+ * opposite of what went wrong.
+ *
+ * A person has two accounts and should never think about it: one here, which owns
+ * sessions and receives invites, and one in their own Supabase project if they
+ * host a corpus. Auth users are per-project, so these are genuinely different
+ * users that happen to share an email.
  */
-export async function signInOrUp(email: string, password: string): Promise<Session> {
-  const attempt = async (path: string) => {
-    const res = await fetch(url(`auth/v1/${path}`), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', apikey: DIRECTORY.publishableKey },
-      body: JSON.stringify({ email, password }),
-    });
-    const body = (await res.json().catch(() => ({}))) as {
-      access_token?: string;
-      refresh_token?: string;
-      user?: { id?: string };
-      msg?: string;
-      message?: string;
-      error_description?: string;
-    };
-    return { ok: res.ok, status: res.status, body };
+async function attempt(path: string, email: string, password: string) {
+  const res = await fetch(url(`auth/v1/${path}`), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', apikey: DIRECTORY.publishableKey },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    access_token?: string;
+    refresh_token?: string;
+    user?: { id?: string };
+    msg?: string;
+    message?: string;
+    error_description?: string;
   };
+  return { ok: res.ok, status: res.status, body };
+}
 
-  const signInAttempt = await attempt('token?grant_type=password');
-  let r = signInAttempt;
-  if (!r.ok || !r.body.access_token) r = await attempt('signup');
+/**
+ * "Confirm email" is on, in the two shapes it arrives as.
+ *
+ * With it enabled, signup either returns a user and no session, or — on the free
+ * tier, once a couple of addresses have been tried — refuses with a mail rate
+ * limit. Neither response names the setting, and the link it wants to send points
+ * at a Site URL nothing serves.
+ */
+const CONFIRM_EMAIL_HELP =
+  'The directory project has "Confirm email" turned on, so it tries to email a confirmation ' +
+  'link that nothing here can receive. Turn it off: Supabase → Authentication → Sign In / ' +
+  'Providers → Email → Confirm email.';
+
+const detailOf = (b: { msg?: string; message?: string; error_description?: string }) =>
+  b.msg ?? b.message ?? b.error_description ?? '';
+
+export async function accountSignIn(email: string, password: string): Promise<Session> {
+  const r = await attempt('token?grant_type=password', email, password);
   if (!r.body.access_token) {
-    /*
-     * Three quite different failures used to arrive as "could not sign in", which
-     * sends whoever reads it to retype a password. Each is named for what it is,
-     * because only one of them is about the password.
-     *
-     * The first two are the same underlying cause: **Confirm email is on**. With it
-     * enabled, signup either returns a user and no session, or — on the free tier,
-     * once a couple of addresses have been tried — refuses with a mail rate limit.
-     * Neither mentions the setting, and the confirmation link it wants to send
-     * points at a Site URL that nothing serves anyway.
-     */
-    const detail = r.body.msg ?? r.body.message ?? r.body.error_description ?? '';
-    const confirmEmailIsOn =
-      /rate limit/i.test(detail) || /confirm/i.test(detail) || Boolean(r.body.user);
-
-    if (confirmEmailIsOn) {
-      throw new Error(
-        'The directory project has "Confirm email" turned on, so it tries to email a ' +
-          'confirmation link that nothing here can receive. Turn it off: Supabase → ' +
-          'Authentication → Sign In / Providers → Email → Confirm email.' +
-          (/rate limit/i.test(detail) ? ' (It is currently refusing with a mail rate limit.)' : ''),
-      );
-    }
+    const detail = detailOf(r.body);
     if (/invalid login credentials/i.test(detail)) {
+      /*
+       * Named as the password, and *not* as a missing account. An earlier version
+       * guessed the account did not exist and tried to create one, which reported
+       * "User already registered" — the exact opposite of the truth.
+       */
       throw new Error(
-        'That email and password did not match an account, and creating one was refused. ' +
-          'Check the password, or use a different email to make a new account.',
+        'Wrong password for that email, or no account with it yet. If you have not made one, ' +
+          'choose "or create one" below.',
       );
     }
-    throw new Error(`Directory sign-in failed: ${detail || `HTTP ${r.status}`}`);
+    if (/email not confirmed/i.test(detail)) throw new Error(CONFIRM_EMAIL_HELP);
+    throw new Error(`Sign-in failed: ${detail || `HTTP ${r.status}`}`);
   }
   return {
     accessToken: r.body.access_token,
@@ -184,6 +186,39 @@ export async function signInOrUp(email: string, password: string): Promise<Sessi
     userId: r.body.user?.id ?? '',
   };
 }
+
+export async function accountSignUp(email: string, password: string): Promise<Session> {
+  const r = await attempt('signup', email, password);
+  const detail = detailOf(r.body);
+
+  if (/already registered/i.test(detail)) {
+    throw new Error('That email already has an account. Choose "or sign in" and use its password.');
+  }
+  if (!r.body.access_token) {
+    if (/rate limit/i.test(detail)) {
+      throw new Error(`${CONFIRM_EMAIL_HELP} (It is currently refusing with a mail rate limit.)`);
+    }
+    // A user with no session means the confirmation email is the missing step.
+    if (r.body.user || /confirm/i.test(detail)) throw new Error(CONFIRM_EMAIL_HELP);
+    throw new Error(`Could not create the account: ${detail || `HTTP ${r.status}`}`);
+  }
+  return {
+    accessToken: r.body.access_token,
+    refreshToken: r.body.refresh_token ?? '',
+    email,
+    userId: r.body.user?.id ?? '',
+  };
+}
+
+/** Sign in, or create the account if there is genuinely none. Used by automation. */
+export async function signInOrUp(email: string, password: string): Promise<Session> {
+  try {
+    return await accountSignIn(email, password);
+  } catch {
+    return await accountSignUp(email, password);
+  }
+}
+
 
 /**
  * Turns a session code into the credentials of the project that holds it.
