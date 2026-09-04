@@ -56,11 +56,12 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
           (n) => alphabet[n % alphabet.length],
         ).join('');
 
-        await publishSession(s, { code, name, openJoin, ownerUserId: s.userId });
         /*
-         * Two rows, doing different jobs. The directory says a code exists and who
-         * owns it; this one is what actually authorises reads, because every policy
-         * in the owner's project consults `shared` here.
+         * The corpus row first. It is what actually authorises reads — every policy
+         * in the owner's project consults `shared` here — while the directory only
+         * records that a code exists. Published first, a failure here left a
+         * joinable code pointing at a project with no matching session, so members
+         * saw an empty corpus and the owner saw nothing wrong at all.
          */
         await createLocalSession(
           { url: project.url, anonKey: project.anonKey },
@@ -72,6 +73,7 @@ export default function WebSessions({ onChanged }: { onChanged?: () => void }) {
           },
           { id: code, name, shared: true },
         );
+        await publishSession(s, { code, name, openJoin, ownerUserId: s.userId });
         return { code, name };
       },
 

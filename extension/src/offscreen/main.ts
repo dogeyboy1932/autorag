@@ -405,16 +405,21 @@ async function handle(request: Request): Promise<unknown> {
         email: request.cloud.email ?? '',
         userId: dir.userId,
       };
-      await publishSession(dirSession, {
-        code,
-        name: request.name,
-        openJoin: request.openJoin,
-        ownerUserId: dir.userId,
-      });
       /*
-       * The corpus-side row is what actually authorises reads. The directory only
-       * says the code exists; `sessions.shared` in the owner's own project is the
-       * flag every policy there consults.
+       * The corpus row first, and the order is the whole point.
+       *
+       * Two rows make a shared session. The one in the owner's own project is what
+       * actually authorises anything — every policy there reads `shared` from it —
+       * while the directory only records that a code exists and who owns it.
+       *
+       * Published first, a failure here left a joinable code pointing at a project
+       * with no matching session: members resolved the code, reached the database,
+       * matched no policy, and saw an empty corpus with nothing anywhere saying
+       * why. The owner saw their own passages the whole time, because they match on
+       * `user_id` instead, so nothing looked wrong from their side either.
+       *
+       * This way a failure leaves a session that is merely private, which is the
+       * safe direction and is visible to the person who caused it.
        */
       await createLocalSession(
         { url: request.cloud.url, anonKey: request.cloud.anonKey },
@@ -426,6 +431,12 @@ async function handle(request: Request): Promise<unknown> {
         },
         { id: code, name: request.name, shared: true },
       );
+      await publishSession(dirSession, {
+        code,
+        name: request.name,
+        openJoin: request.openJoin,
+        ownerUserId: dir.userId,
+      });
       record('done', `Created session ${request.name} (${code})`);
       return { code, name: request.name };
     }
