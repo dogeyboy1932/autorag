@@ -121,7 +121,7 @@ function openInReader(pdfUrl: string) {
  */
 async function sendToTab(
   tab: chrome.tabs.Tab,
-  message: { type: string; srcUrl?: string },
+  message: { type: string; [key: string]: unknown },
 ): Promise<unknown> {
   if (!tab.id) return null;
   try {
@@ -189,19 +189,64 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 /*
  * Keyboard is the point of a standby tool. Reaching for a button is already more
  * friction than most things are worth; a keystroke while you are still reading is
- * not. Both shortcuts act on the tab you are looking at — nothing is ever typed,
+ * not. Every shortcut acts on the tab you are looking at — nothing is ever typed,
  * pasted or addressed by URL.
+ *
+ * **The panel is opened before anything is awaited.** `sidePanel.open` only works
+ * inside a user gesture, and the gesture does not survive an `await` — so the
+ * `tab` Chrome hands the listener is used directly instead of querying for one.
  */
-chrome.commands.onCommand.addListener(async (command) => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) return;
-  if (command === 'keep-selection') {
-    void sendToTab(tab, { type: 'autorag:capture-selection' });
+chrome.commands.onCommand.addListener((command, commandTab) => {
+  if (command === 'open-panel' || command === 'ask-memory') {
+    if (commandTab?.windowId !== undefined) {
+      void chrome.sidePanel.open({ windowId: commandTab.windowId }).catch(() => {});
+    }
+    if (command === 'ask-memory') {
+      // The panel may be opening or already open; it reads this either way.
+      void chrome.storage.session.set({ panelIntent: { tab: 'ask', at: Date.now() } });
+    }
+    return;
   }
-  if (command === 'keep-page') {
-    void sendToTab(tab, { type: 'autorag:capture-page' });
-  }
+
+  void (async () => {
+    const [tab] = commandTab?.id
+      ? [commandTab]
+      : await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    if (command === 'keep-selection') {
+      void sendToTab(tab, { type: 'autorag:capture-selection' });
+    }
+    if (command === 'keep-page') {
+      void sendToTab(tab, { type: 'autorag:capture-page' });
+    }
+    if (command === 'approve-latest') {
+      void sendToTab(tab, { type: 'autorag:toast', message: await approveLatest() });
+    }
+  })();
 });
+
+/** What the approve shortcut did, in the words its toast will say. */
+async function approveLatest(): Promise<{ text: string; tone: 'ok' | 'warn' | 'bad' }> {
+  try {
+    await ensureOffscreen();
+    const reply = (await chrome.runtime.sendMessage(
+      envelope('offscreen', { kind: 'approveLatest' }),
+    )) as
+      | { ok: true; data: { approved: string[]; skipped: number; title: string | null } }
+      | { ok: false; error: string };
+    if (!reply?.ok) return { text: reply?.error ?? 'Could not approve', tone: 'bad' };
+    const { approved, skipped, title } = reply.data;
+    const name = title ? ` “${title.slice(0, 40)}”` : '';
+    if (!approved.length && !skipped) return { text: 'Nothing waiting to approve', tone: 'warn' };
+    if (!approved.length) {
+      return { text: `Flagged${name} — left in review for you to read`, tone: 'warn' };
+    }
+    const flagged = skipped ? ` · ${skipped} flagged, left in review` : '';
+    return { text: `Approved${name} · now searchable${flagged}`, tone: skipped ? 'warn' : 'ok' };
+  } catch (err) {
+    return { text: err instanceof Error ? err.message : String(err), tone: 'bad' };
+  }
+}
 
 /*
  * The in-page offer on a Chrome-rendered PDF. The content script cannot open an

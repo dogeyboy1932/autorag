@@ -48,8 +48,9 @@ never onto the passage's status.
 Nothing becomes searchable until a person presses Keep.
 
 **Only Ask leaves the device.** It sends your question and the retrieved passages to
-Claude, which is forbidden from filling gaps with its own knowledge. Search alone is
-entirely local and free.
+Claude, which answers from them first and cites each claim. When your memory does not
+cover the question, it answers from its own knowledge — set apart, uncited, under a
+warning that the memory could not help. Search alone is entirely local and free.
 
 **Sharing uses two Supabase projects.** A *corpus* project holds your passages; a
 separate *directory* holds session codes, invites and profiles — never a passage. A

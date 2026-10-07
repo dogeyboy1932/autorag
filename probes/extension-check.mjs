@@ -12,7 +12,7 @@
  */
 import puppeteer from 'puppeteer-core';
 import { createServer } from 'node:http';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -291,7 +291,14 @@ try {
    * check can catch that class of bug, because nothing else reports it.
    */
   const binds = await panel.evaluate(() => chrome.commands.getAll());
-  const unbound = binds.filter((c) => c.name !== '_execute_action' && !c.shortcut);
+  // Only commands the manifest gives a default key. One declared without a key is
+  // unbound on purpose — the four-default limit — and is the person's to assign.
+  const manifestCommands = JSON.parse(
+    readFileSync(resolve(EXT, 'manifest.json'), 'utf8'),
+  ).commands;
+  const unbound = binds.filter(
+    (c) => manifestCommands[c.name]?.suggested_key && !c.shortcut,
+  );
   log(
     'every keyboard shortcut the manifest asks for is actually assigned',
     unbound.length === 0,
@@ -1108,8 +1115,10 @@ try {
   );
 
   log(
-    'the answer is grounded: only retrieved passages go up, and outside knowledge is forbidden',
-    allRetrievedWereSent && /Never fill a gap from your own knowledge/.test(sent?.body?.system ?? ''),
+    'the answer is grounded: retrieved passages go up, and outside knowledge must be marked as such',
+    allRetrievedWereSent &&
+      (sent?.body?.system ?? '').includes('[[OUTSIDE_MEMORY]]') &&
+      /Never put your own knowledge before the marker/.test(sent?.body?.system ?? ''),
     sent
       ? `${retrieved.length} retrieved passage(s) in the prompt, ${sent.body?.model} at effort ${sent.body?.output_config?.effort}`
       : 'nothing was sent',

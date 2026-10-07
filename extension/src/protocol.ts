@@ -39,6 +39,12 @@ export type Request =
     }
   | { kind: 'listSources' }
   | { kind: 'approve'; chunkIds: string[] }
+  /**
+   * Approves the newest capture still waiting for review — the keyboard's way to
+   * say "yes, keep that" without opening the panel. Flagged chunks are left for a
+   * person to read; see the handler.
+   */
+  | { kind: 'approveLatest' }
   /** `reason` is optional: a person may discard without justifying it. */
   | { kind: 'reject'; chunkIds: string[]; reason?: string }
   | { kind: 'markStale'; sourceId: string; stale: boolean; reason?: string }

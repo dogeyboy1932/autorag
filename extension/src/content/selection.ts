@@ -294,6 +294,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void keep(readablePageText(), 'this page');
     return;
   }
+  // A shortcut that acted somewhere else — approving — reporting back where you are.
+  if (message?.type === 'autorag:toast' && message.message?.text) {
+    toast(String(message.message.text), message.message.tone ?? 'ok');
+    return;
+  }
   if (message?.type === PREVIEW_PAGE || message?.type === PREVIEW_SELECTION) {
     const text =
       message.type === PREVIEW_PAGE ? readablePageText() : (window.getSelection()?.toString() ?? '');

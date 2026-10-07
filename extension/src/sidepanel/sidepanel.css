@@ -315,6 +315,11 @@ footer .leaves { color: var(--accent-strong); }
   border-radius: 4px 14px 14px 14px; padding: 11px 13px; }
 .turn .a .text { margin: 0; max-height: none; overflow: visible;
   white-space: pre-wrap; font-size: 13px; line-height: 1.65; }
+/* What the memory could not supply: answered anyway, and visibly not from it. */
+.turn .a .outside { margin-top: 10px; border-left: 2px solid var(--warn); padding-left: 10px; }
+.turn .a .text + .outside { margin-top: 12px; }
+.turn .a .outside:first-child { margin-top: 0; }
+.outside-notice { margin: 0 0 6px; font-size: 11.5px; color: var(--warn); font-weight: 500; }
 .turn .meta { margin: 8px 0 0; font-size: 11px; color: var(--muted); font-style: italic; }
 
 /* Sources: one line at the foot of the pane until you want them. */

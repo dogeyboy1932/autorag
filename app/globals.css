@@ -297,6 +297,9 @@ textarea.field { resize: vertical; line-height: 1.6; }
   color: var(--accent-strong); line-height: 1.45;
 }
 .turn-a { margin: 0; font-size: var(--text); line-height: 1.7; white-space: pre-wrap; }
+/* What the memory could not supply: answered anyway, and visibly not from it. */
+.turn-outside { border-left: 2px solid var(--warn); padding-left: 12px; }
+.turn-outside-notice { margin: 0 0 6px; color: var(--warn); font-size: var(--text-sm); font-weight: 500; }
 
 /*
  * The passages behind a turn.

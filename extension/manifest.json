@@ -82,6 +82,23 @@
         "mac": "Command+Shift+E"
       },
       "description": "Keep the whole article you are reading"
+    },
+    "open-panel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Open the Autorag panel"
+    },
+    "ask-memory": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space"
+      },
+      "description": "Ask your memory — opens the panel ready to type"
+    },
+    "approve-latest": {
+      "description": "Approve your newest capture so it becomes searchable"
     }
   }
 }

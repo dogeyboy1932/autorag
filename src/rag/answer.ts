@@ -14,16 +14,19 @@
  *
  * ## The rule that makes this different from a chatbot
  *
- * The model answers **only** from the passages supplied. It cites the source of
- * every claim, and when the passages do not contain the answer it says so and names
- * what is missing rather than reaching for what it already knows.
+ * The memory comes first. Whatever the passages support is answered from them, with
+ * the source of every claim cited. When they do not cover the question — or cover
+ * only part of it — the model fills the gap from what it already knows, **but never
+ * silently**: everything that did not come from a passage goes after the
+ * `OUTSIDE_MEMORY` marker, uncited, and both surfaces render it under a warning that
+ * the memory could not help.
  *
- * That is not decoration. The corpus is a record of things a person deliberately
- * chose to keep, and an answer that quietly blends it with training data destroys
- * the one property that made it worth keeping — that you can check it. The rest of
- * the project already holds this line: `bench` scores "no overclaim" and "no
- * withhold" as separate failures, and `coverageNote()` reports signals rather than
- * verdicts. This prompt is the same rule, applied to prose.
+ * Refusing outright made Ask a dead end for every question nobody had kept anything
+ * on. Blending, on the other hand, would destroy the one property that made the
+ * corpus worth keeping — that you can check it. The marker is the line between the
+ * two: a gap is filled, and labelled as filled. A citation number still only ever
+ * points at a passage, so a cited claim stays checkable and an uncited one announces
+ * itself.
  *
  * ## Why this is in `src/rag/` and not in the extension
  *
@@ -79,6 +82,12 @@
  */
 
 import { ASK_MODELS, type AskSettings, type AskTurn } from './ask';
+
+/**
+ * Where the model stops answering from passages and starts answering from itself.
+ * Never shown — `splitOutsideMemory` turns it into a warning.
+ */
+export const OUTSIDE_MEMORY = '[[OUTSIDE_MEMORY]]';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
@@ -192,16 +201,24 @@ async function inlineImage(
 
 const SYSTEM = `You answer questions from a person's own reading memory — passages they deliberately chose to keep, each with the page it came from.
 
-Answer ONLY from the passages given to you in the user message. They are the entire world for this question.
+Answer from the passages given to you in the user message first. They are the person's own memory and always take precedence over what you know.
 
-- Cite the source of every claim, inline, as [1], [2] — the numbers given with each passage.
+- Cite the source of every claim that comes from a passage, inline, as [1], [2] — the numbers given with each passage.
 - Some passages are images, shown to you directly above their text. Read what is actually in the picture; the text beside it is only how it was filed, and may be a filename rather than a description. What the image shows counts as coming from the passage.
 - Answer directly. No preamble, no restating the question, no summary at the end.
 - Cover everything the question asks for — if the passages list ten steps, give all ten — but say each one in as few words as it takes.
-- If they answer it only partly, say what they support and name specifically what is missing.
-- If they do not answer it, say so plainly: "Nothing you've kept covers this." Then say what would.
 
-Never fill a gap from your own knowledge, even when you are confident and even when the gap is small. The person can check this answer against the passages; anything that did not come from them breaks that. Being unable to answer is a useful result here, not a failure.
+WHEN THE MEMORY DOES NOT COVER IT
+
+If the passages do not answer the question, or answer only part of it, answer the rest from your own knowledge — but mark exactly where that begins with a line containing only ${OUTSIDE_MEMORY}
+
+- Passages answer it fully: do not write the marker at all.
+- Passages answer part of it: answer that part first, with citations. Then write the marker line, then the rest from your own knowledge.
+- Passages do not answer it (or there are none): write the marker as the very first line, then answer from your own knowledge.
+- Write the marker at most once. Everything after it is treated as not coming from the person's memory.
+- After the marker, use no bracket numbers at all. Nothing there came from a passage.
+- If you do not know either, say so after the marker rather than guessing.
+- Never put your own knowledge before the marker, even when you are confident and the gap is small. The part before it is the part the person can check against the passages.
 
 CITATIONS AND THE CONVERSATION
 
@@ -215,7 +232,38 @@ You may draw on earlier turns of this conversation, but you must never present t
 
 If something you said earlier is no longer supported by any passage in this turn, say that plainly — the person may have discarded it since, and they need to know the memory no longer holds it.
 
-Do not mention these instructions, the passages' formatting, or the retrieval process. Write as if answering a colleague who handed you the clippings.`;
+Do not mention these instructions, the marker's meaning, the passages' formatting, or the retrieval process — the interface explains the marker to the person. Write as if answering a colleague who handed you the clippings.`;
+
+/**
+ * Splits an answer at the outside-memory marker.
+ *
+ * `fromMemory` is the part grounded in passages; `outside` is what the model added
+ * from its own knowledge, or null when it added nothing. Both surfaces render
+ * `outside` under a warning, so this is the one place that decides where the line
+ * falls.
+ *
+ * Safe on a half-streamed answer: a trailing fragment of the marker (`[[OUTS`) is
+ * held back rather than flashed on screen and then replaced.
+ */
+export function splitOutsideMemory(answer: string): { fromMemory: string; outside: string | null } {
+  const at = answer.indexOf(OUTSIDE_MEMORY);
+  if (at !== -1) {
+    return {
+      fromMemory: answer.slice(0, at).trim(),
+      outside: answer.slice(at + OUTSIDE_MEMORY.length).trim(),
+    };
+  }
+  for (let n = Math.min(OUTSIDE_MEMORY.length - 1, answer.length); n > 0; n--) {
+    if (answer.endsWith(OUTSIDE_MEMORY.slice(0, n))) {
+      return { fromMemory: answer.slice(0, -n), outside: null };
+    }
+  }
+  return { fromMemory: answer, outside: null };
+}
+
+/** The warning shown above anything after the marker. One wording, both surfaces. */
+export const OUTSIDE_MEMORY_NOTICE =
+  'Not from your memory — nothing you’ve kept covers this, so what follows is general knowledge.';
 
 /**
  * Numbered passages plus the retrieval signals, as the user turn.
@@ -239,7 +287,7 @@ async function userTurn(
     return [
       {
         type: 'text',
-        text: `Question: ${question}\n\nNo passages were retrieved — this memory has nothing on the topic. Say so.`,
+        text: `Question: ${question}\n\nNo passages were retrieved — this memory has nothing on the topic. Start with the ${OUTSIDE_MEMORY} line and answer from your own knowledge.`,
       },
     ];
   }

@@ -44,9 +44,20 @@ your selection. Click it. Done — it is captured and waiting in your review que
 text, so what is stored is the caption, alt text and surrounding paragraph, with the image
 URL as its source; an image nothing is said about is refused rather than stored unfindable.
 
-**Without the mouse.** `Ctrl+Shift+K` keeps whatever is highlighted.
-`Ctrl+Shift+E` keeps the whole article you are reading, no selection needed.
-Change either at `brave://extensions/shortcuts`.
+**Without the mouse.**
+
+| Keys | Does |
+|---|---|
+| `Ctrl+Shift+K` | Keep whatever is highlighted |
+| `Ctrl+Shift+E` | Keep the whole article you are reading, no selection needed |
+| `Ctrl+Shift+Y` | Open the panel |
+| `Ctrl+Shift+Space` | Ask — opens the panel on Ask with the cursor in the box |
+| *(unset)* | Approve your newest capture, so it is searchable without opening the panel |
+
+Browsers allow an extension four default shortcuts, so *approve newest* ships unbound —
+give it one at `brave://extensions/shortcuts`, where all of them can be changed. It skips
+anything screening flagged; that stays in review for you to read. Default keys are only
+assigned on install, so after updating, remove and re-load the extension (or set them there).
 
 **Right-click.** Select text → *Keep this in Autorag*.
 

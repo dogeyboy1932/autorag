@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SCHEMA_SQL } from '@/src/rag/sync';
+import { OUTSIDE_MEMORY_NOTICE, splitOutsideMemory } from '@/src/rag/answer';
 import { PERSONAL } from '@/src/rag/sessions';
 import Sessions, { type SessionsApi, type SessionSummary } from '@/components/Sessions';
 import {
@@ -1370,6 +1371,28 @@ interface RecallResult {
   images_sent?: number;
   /** Present when a follow-up was rewritten before retrieval. */
   searched_for?: string;
+  /** True when part of the answer came from the model rather than the memory. */
+  outside_memory?: boolean;
+}
+
+/**
+ * An answer, with anything the memory could not supply set apart under a warning.
+ * The model marks where its own knowledge begins; this is where that mark becomes
+ * something a person can see at a glance.
+ */
+function AnswerText({ answer }: { answer: string }) {
+  const { fromMemory, outside } = splitOutsideMemory(answer);
+  return (
+    <>
+      {fromMemory && <p className="text">{fromMemory}</p>}
+      {outside !== null && (
+        <div className="outside">
+          <p className="outside-notice">{OUTSIDE_MEMORY_NOTICE}</p>
+          {outside && <p className="text">{outside}</p>}
+        </div>
+      )}
+    </>
+  );
 }
 
 /** One exchange, kept only while Remember is on. */
@@ -1391,7 +1414,7 @@ interface Exchange {
  * sources for the current answer live in a drawer at the foot of the pane — one
  * line when shut, a sheet when open. The thread survives closing the panel.
  */
-function Recall({ settings }: { settings: AskSettings }) {
+function Recall({ settings, focusSignal }: { settings: AskSettings; focusSignal: number }) {
   const [q, setQ] = useState('');
   const [thread, setThread] = useState<Exchange[]>([]);
   const [remember, setRemember] = useState(false);
@@ -1401,6 +1424,18 @@ function Recall({ settings }: { settings: AskSettings }) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * The ask shortcut lands here: the cursor goes in the box so the question can be
+   * typed straight away. A frame later, because the pane has only just been made
+   * visible and a hidden input refuses focus.
+   */
+  useEffect(() => {
+    if (!focusSignal) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [focusSignal]);
 
   /*
    * The thread outlives the panel. A side panel closes whenever you click the
@@ -1471,8 +1506,9 @@ function Recall({ settings }: { settings: AskSettings }) {
           <div className="hello">
             <h2>Ask your memory</h2>
             <p className="note">
-              Everything you have kept, and nothing else. Answers cite the page each claim
-              came from, and say so plainly when you never kept anything on the subject.
+              Everything you have kept comes first, and answers cite the page each claim
+              came from. When you never kept anything on the subject, the answer comes
+              from general knowledge instead — and says so.
             </p>
           </div>
         )}
@@ -1482,7 +1518,7 @@ function Recall({ settings }: { settings: AskSettings }) {
             <p className="q">{t.question}</p>
             <div className="a">
               {t.result.answer ? (
-                <p className="text">{t.result.answer}</p>
+                <AnswerText answer={t.result.answer} />
               ) : (
                 <p className="note">
                   {t.result.hits.length} passage{t.result.hits.length === 1 ? '' : 's'} found.
@@ -1564,6 +1600,7 @@ function Recall({ settings }: { settings: AskSettings }) {
       <div className="composer">
         <div className="row">
           <input
+            ref={inputRef}
             placeholder="Ask your memory…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -1920,6 +1957,30 @@ function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [settings, saveSettings] = useAskSettings();
   const [cloud, saveCloud] = useCloud();
+  const [askFocus, setAskFocus] = useState(0);
+
+  /*
+   * The ask shortcut, arriving from the service worker. It writes an intent to
+   * session storage rather than messaging the panel, because the panel may not
+   * exist yet when the key is pressed — read on mount covers a panel the shortcut
+   * just opened, the change listener covers one that was already open. Stale
+   * intents are ignored so a panel opened by hand later does not jump tabs.
+   */
+  useEffect(() => {
+    const take = (intent: unknown) => {
+      const i = intent as { tab?: string; at?: number } | undefined;
+      if (i?.tab !== 'ask' || !i.at || Date.now() - i.at > 5000) return;
+      void chrome.storage.session.remove('panelIntent');
+      setTab('ask');
+      setAskFocus((n) => n + 1);
+    };
+    void chrome.storage.session.get('panelIntent').then((v) => take(v.panelIntent));
+    const onChange = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === 'session' && changes.panelIntent) take(changes.panelIntent.newValue);
+    };
+    chrome.storage.onChanged.addListener(onChange);
+    return () => chrome.storage.onChanged.removeListener(onChange);
+  }, []);
 
   const refresh = useCallback(async () => {
     const [p, s] = await Promise.all([
@@ -2015,7 +2076,7 @@ function App() {
         for the same reason.
       */}
       <div className={tab === 'ask' ? 'pane' : 'pane off'}>
-        <Recall settings={settings} />
+        <Recall settings={settings} focusSignal={askFocus} />
       </div>
 
       <div className={tab === 'library' ? 'pane' : 'pane off'}>

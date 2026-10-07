@@ -293,6 +293,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     void documentText().then((text) => keep(text, 'this PDF'));
     return;
   }
+  if (message?.type === 'autorag:toast' && message.message?.text) {
+    toast(String(message.message.text), message.message.tone ?? 'ok');
+    return;
+  }
   if (message?.type === PREVIEW_PAGE || message?.type === PREVIEW_SELECTION) {
     const wanted =
       message.type === PREVIEW_PAGE

@@ -3,10 +3,37 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SearchHit } from '@/src/types';
 import { search, confidenceOf, coverageNote } from '@/src/rag/search';
-import { askModel, standaloneQuery, type DemoUsage, type Passage } from '@/src/rag/answer';
+import {
+  OUTSIDE_MEMORY_NOTICE,
+  askModel,
+  splitOutsideMemory,
+  standaloneQuery,
+  type DemoUsage,
+  type Passage,
+} from '@/src/rag/answer';
 import type { AskSettings, AskTurn } from '@/src/rag/ask';
 import Hit from './Hit';
 import { Button, Empty, Field, Pill } from './ui';
+
+/**
+ * An answer, with anything the memory could not supply set apart under a warning.
+ * Used for the streaming text too: `splitOutsideMemory` holds back a half-arrived
+ * marker, so the warning appears the moment the model crosses the line.
+ */
+function AnswerText({ answer }: { answer: string }) {
+  const { fromMemory, outside } = splitOutsideMemory(answer);
+  return (
+    <>
+      {fromMemory && <p className="turn-a">{fromMemory}</p>}
+      {outside !== null && (
+        <div className="turn-outside">
+          <p className="turn-outside-notice">{OUTSIDE_MEMORY_NOTICE}</p>
+          {outside && <p className="turn-a">{outside}</p>}
+        </div>
+      )}
+    </>
+  );
+}
 
 /**
  * Ask, and search, in one place — because they are one question asked with
@@ -230,10 +257,10 @@ export default function AskPanel({ settings }: { settings: AskSettings }) {
               Ask your memory
             </h2>
             <p className="note">
-              Everything you have kept, and nothing else. <strong>Search</strong> ranks your
-              passages locally and shows them. <strong>Ask</strong> retrieves the same passages
-              and has a model write an answer that cites them — and says so plainly when you
-              never kept anything on the subject.
+              Everything you have kept comes first. <strong>Search</strong> ranks your passages
+              locally and shows them. <strong>Ask</strong> retrieves the same passages and has a
+              model write an answer that cites them — and when you never kept anything on the
+              subject, answers from general knowledge and says so.
             </p>
           </div>
         </div>
@@ -242,7 +269,7 @@ export default function AskPanel({ settings }: { settings: AskSettings }) {
           <article className="turn" key={i}>
             <p className="turn-q">{t.question}</p>
 
-            {t.answer && <p className="turn-a">{t.answer}</p>}
+            {t.answer && <AnswerText answer={t.answer} />}
             {t.searchedFor && <p className="note">searched for &ldquo;{t.searchedFor}&rdquo;</p>}
 
             {t.hits.length === 0 ? (
@@ -276,7 +303,7 @@ export default function AskPanel({ settings }: { settings: AskSettings }) {
         <article className="turn">
           <p className="turn-q">{q}</p>
           {streaming ? (
-            <p className="turn-a">{streaming}</p>
+            <AnswerText answer={streaming} />
           ) : (
             <p className="note">{busy === 'ask' ? 'Reading your passages…' : 'Searching…'}</p>
           )}

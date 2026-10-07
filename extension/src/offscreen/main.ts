@@ -30,7 +30,7 @@ import {
 import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne } from '@/src/rag/embed';
 import { env } from '@huggingface/transformers';
 import { isEnvelope, type CloudSettings, type Event, type Request, type Response } from '../protocol';
-import { askModel, standaloneQuery } from '@/src/rag/answer';
+import { askModel, splitOutsideMemory, standaloneQuery } from '@/src/rag/answer';
 import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
 import {
   directoryConfigured,
@@ -586,10 +586,17 @@ async function handle(request: Request): Promise<unknown> {
         record('failed', 'The answering model could not be reached');
         throw err;
       }
-      record('done', `Answered from ${passages.length} passage${passages.length === 1 ? '' : 's'}`);
+      const outsideMemory = splitOutsideMemory(answer).outside !== null;
+      record(
+        'done',
+        outsideMemory
+          ? 'Answered partly from general knowledge — the memory did not cover it'
+          : `Answered from ${passages.length} passage${passages.length === 1 ? '' : 's'}`,
+      );
       return {
         question: request.question,
         answer,
+        outside_memory: outsideMemory,
         hits: r.hits,
         confidence,
         coverage_note: note,
@@ -859,6 +866,29 @@ async function handle(request: Request): Promise<unknown> {
       const ids = await decideChunks(request.chunkIds, 'approved');
       record('done', `Kept ${ids.length} passage${ids.length > 1 ? 's' : ''} — now searchable`);
       return { approved: ids };
+    }
+
+    /*
+     * The newest capture is the most recently ingested source with anything still
+     * pending. Its chunks are approved together, because one keystroke kept them
+     * together.
+     *
+     * Chunks screening flagged are skipped, not approved: a conflict was raised for
+     * a person to read, and a shortcut pressed from another page is not reading it.
+     * They stay in To review, and the toast says so.
+     */
+    case 'approveLatest': {
+      const pending = (await allChunks()).filter((c) => c.status === 'pending');
+      if (pending.length === 0) return { approved: [], skipped: 0, title: null };
+      const newest = pending.reduce((a, b) => (b.ingestedAt > a.ingestedAt ? b : a));
+      const batch = pending.filter((c) => c.sourceId === newest.sourceId);
+      const clean = batch.filter((c) => c.conflicts.length === 0).map((c) => c.id);
+      const ids = clean.length ? await decideChunks(clean, 'approved') : [];
+      const title = (await allSources()).find((s) => s.id === newest.sourceId)?.title ?? null;
+      if (ids.length) {
+        record('done', `Kept ${ids.length} passage${ids.length > 1 ? 's' : ''} by shortcut — now searchable`);
+      }
+      return { approved: ids, skipped: batch.length - clean.length, title };
     }
 
     case 'reject': {
