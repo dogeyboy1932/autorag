@@ -6,8 +6,7 @@ import AskPanel from '@/components/AskPanel';
 import AskSettingsPanel, { useAskSettings } from '@/components/AskSettings';
 import CorpusView from '@/components/CorpusView';
 import AccountBar from '@/components/AccountBar';
-import AttachProject from '@/components/AttachProject';
-import Shell from '@/components/Shell';
+import Shell, { useAccount } from '@/components/Shell';
 import WebSessions, { WebSyncButton } from '@/components/WebSessions';
 import GetExtension from '@/components/GetExtension';
 import DeclarativeIngestForm from '@/components/DeclarativeIngestForm';
@@ -25,7 +24,7 @@ type Tab = 'ask' | 'library' | 'settings';
  * Three tabs, split by what you are doing rather than by what the code does.
  *
  * This was ten panels in one column — capture, queue, search, ask, corpus,
- * sessions, project setup, activity and two demos, all stacked and all the same
+ * sessions, project setup (since removed), activity and two demos, all stacked and all the same
  * weight. It read as a list of controls to work through rather than a place with a
  * few things you might want, and the two you actually use daily were four screens
  * apart.
@@ -53,6 +52,7 @@ export default function Home() {
 function App() {
   const [tab, setTab] = useState<Tab>('ask');
   const [settings, saveSettings] = useAskSettings();
+  const [account] = useAccount();
 
   const loadPending = useCallback(async () => (await chunksByStatus('pending')).length, []);
   const [pending] = useCorpusData(loadPending, 0);
@@ -114,21 +114,17 @@ function App() {
         <ActivityLog />
         <GetExtension />
         <DeclarativeIngestForm />
-        {/*
-          Last, and collapsed. Hosting a corpus of your own is the one thing here
-          that needs a database you own — it is the rarest thing on this page and
-          the longest, so it goes at the bottom rather than greeting everybody.
-        */}
-        <AttachProject />
       </div>
 
       <footer className="app-footer">
         <div className="app-footer-inner">
           <StatsBar />
-          <span className={settings.apiKey ? 'leaves' : ''}>
-            {settings.apiKey
-              ? 'Kept on this machine · only answers leave it'
-              : 'Kept on this machine · nothing is uploaded'}
+          <span className={settings.apiKey || account?.directory ? 'leaves' : ''}>
+            {account?.directory
+              ? `Synced to your Autorag account${settings.apiKey ? ' · answers go to Anthropic' : ''}`
+              : settings.apiKey
+                ? 'Kept on this machine · only answers leave it'
+                : 'Kept on this machine · nothing is uploaded'}
           </span>
         </div>
       </footer>

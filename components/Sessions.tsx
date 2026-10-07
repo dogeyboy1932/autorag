@@ -21,10 +21,10 @@ import { PERSONAL } from '@/src/rag/sessions';
  *
  * ## The header is not decoration
  *
- * It always names whose database you are writing to. Joining someone else's
- * session means every passage you approve lands in *their* project — the one
- * action here a person can take without noticing, and the only one they cannot
- * undo from their own machine.
+ * It always names whose corpus you are writing to. Joining someone else's session
+ * means every passage you approve lands in *their* session, readable by everyone
+ * in it — the one action here a person can take without noticing, and the only
+ * one they cannot undo on their own.
  */
 
 export interface SessionSummary {
@@ -36,41 +36,28 @@ export interface SessionSummary {
 export interface SessionsApi {
   list(): Promise<SessionSummary[]>;
   create(name: string, openJoin: boolean): Promise<{ code: string; name: string }>;
-  join(code: string): Promise<{ code: string; host: { url: string; anonKey: string; name: string } }>;
+  join(code: string): Promise<{ code: string; name: string }>;
   invite(code: string, email: string): Promise<void>;
-  /**
-   * Move to a session (or back to personal) and reconcile.
-   *
-   * `host` is optional because the caller usually does not know it: a session
-   * picked from the list is just a code, and whether it lives in this person's
-   * project or somebody else's is a question only the directory can answer. The
-   * implementation resolves it. Passing one is a shortcut for the join path, which
-   * has just looked it up.
-   */
-  switchTo(session: { id: string; host?: { url: string; anonKey: string; name: string } } | null): Promise<{ pulled: number }>;
+  /** Move to a session (or back to personal) and reconcile. */
+  switchTo(session: { id: string } | null): Promise<{ pulled: number }>;
 }
 
 export default function Sessions({
   api,
   activeSessionId,
-  hostedName,
-  hostProject,
-  canHost,
+  canCreate,
   signedIn,
   onChanged,
 }: {
   api: SessionsApi;
   activeSessionId: string;
-  /** Set when the active session belongs to someone else. */
-  hostedName?: string;
-  /** The host's project, so Sync can re-reach a joined session. */
-  hostProject?: { url: string; anonKey: string; name: string };
-  /** Whether a Supabase project is attached — required to *host*, never to join. */
-  canHost: boolean;
+  /** A real account, not a demo one: only it can own a session. */
+  canCreate: boolean;
   signedIn: boolean;
   onChanged?: () => void;
 }) {
   const [list, setList] = useState<SessionSummary[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [invite, setInvite] = useState('');
@@ -79,12 +66,18 @@ export default function Sessions({
   const [msg, setMsg] = useState<React.ReactNode>(null);
 
   const active = activeSessionId || PERSONAL;
-  const hosted = Boolean(hostedName);
+  /*
+   * Someone else's session: active, and not one this person owns. `list` returns
+   * only owned sessions, so anything joined by code is absent from it. Until the
+   * list has loaded this reads as not-hosted, rather than raising a false alarm.
+   */
+  const hosted = active !== PERSONAL && loaded && !list.some((x) => x.code === active);
 
   const refresh = useCallback(async () => {
     if (!signedIn) return;
     try {
       setList(await api.list());
+      setLoaded(true);
     } catch {
       /* a directory that is down should not blank the switcher */
     }
@@ -99,7 +92,7 @@ export default function Sessions({
       <Fold title="Sessions" status="signed out">
         <p className="note">
           A session lets several people share one memory. Sign in to create one or join
-          someone else&rsquo;s — an account is all it takes, no Supabase project.
+          someone else&rsquo;s — an account is all it takes.
         </p>
       </Fold>
     );
@@ -122,12 +115,12 @@ export default function Sessions({
   return (
     <Fold
       title="Sessions"
-      status={active === PERSONAL ? 'personal' : hosted ? `${hostedName} · shared` : active}
+      status={active === PERSONAL ? 'personal' : hosted ? `${active} · shared` : (list.find((x) => x.code === active)?.name ?? active)}
     >
       {hosted && (
         <p className="note bad">
-          You are keeping into <strong>someone else&rsquo;s</strong> project. Everything you
-          approve here is readable by everyone in this session.
+          You are keeping into <strong>someone else&rsquo;s</strong> session. Everything you
+          approve here is readable by everyone in it.
         </p>
       )}
 
@@ -191,7 +184,7 @@ export default function Sessions({
             try {
               const joined = await api.join(code.trim());
               setCode('');
-              await go({ id: joined.code, host: joined.host }, joined.host.name || joined.code);
+              await go({ id: joined.code }, joined.name || joined.code);
               void refresh();
             } catch (err) {
               setMsg(err instanceof Error ? err.message : String(err));
@@ -203,13 +196,13 @@ export default function Sessions({
         </Button>
       </div>
       <p className="note">
-        Joining needs only an account — no Supabase project. A code is a bearer token: anyone
-        holding it can join, which is exactly why it works for a session that is not listed.
+        Joining needs only an account. A code is a bearer token: anyone holding it can join,
+        which is exactly why it works for a session that is not listed.
       </p>
 
       <hr />
 
-      {canHost ? (
+      {canCreate ? (
         <>
           <div className="row">
             <Field
@@ -290,21 +283,18 @@ export default function Sessions({
         </>
       ) : (
         /*
-         * Explained rather than hidden or disabled. A greyed-out Create with no
-         * reason next to it reads as broken; the actual answer — that hosting is the
-         * one thing needing a project of your own — is short and worth saying.
+         * Explained rather than hidden or disabled: a greyed-out Create with no
+         * reason next to it reads as broken.
          */
         <p className="note">
-          To <strong>create</strong> a session you need your own Supabase project, because a
-          shared corpus has to live in a database somebody owns. Attach one under{' '}
-          <strong>Host your own memory</strong>, at the foot of Settings. Joining someone
-          else&rsquo;s needs nothing.
+          A demo account can join sessions but not create them — sign in with an email to
+          make your own.
         </p>
       )}
 
       <p className="note">
         Everyone in a session reads every passage in it. An invite is safer than a code: a code
-        is a bearer token, while an invite releases credentials only to the address you named.
+        is a bearer token, while an invite admits only the address you named.
       </p>
       {msg && <p className="note">{msg}</p>}
     </Fold>

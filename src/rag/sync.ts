@@ -49,12 +49,12 @@ export interface CloudConfig {
   url: string;
   anonKey: string;
   /**
-   * The shared session this connection mirrors. Absent means the private corpus —
-   * rows with no `session_id`, visible to nobody but their owner.
+   * The session this connection mirrors. Absent means the personal corpus —
+   * `session_id = 'personal'`, visible to nobody but its owner.
    *
-   * This is the whole of what makes a sync safe to point at someone else's
-   * project: a run only ever pushes rows already tagged with this session, and
-   * only ever reads rows carrying it. A passage kept privately cannot be swept
+   * This is the whole of what makes a sync safe in a project everyone shares: a
+   * run only ever pushes rows already tagged with this session, and only ever
+   * reads rows carrying it. A passage kept privately cannot be swept
    * into a shared session by connecting to one, which is the mistake that would
    * matter most and would be discovered by someone else reading your notes.
    */
@@ -65,15 +65,7 @@ export interface Session {
   accessToken: string;
   refreshToken: string;
   email: string;
-  /**
-   * The signed-in user's id *in the project this session belongs to*.
-   *
-   * Worth stating because it is the thing most likely to be mixed up: auth users
-   * are per-project, so the id you get from your own corpus project is unrelated
-   * to the id you get from the directory. Sessions and profiles are keyed by the
-   * directory's; rows in your corpus are keyed by your project's. Passing one
-   * where the other belongs fails as silently as a lookup that finds nothing.
-   */
+  /** The account's id — what sessions, profiles and every passage's `user_id` refer to. */
   userId: string;
 }
 
@@ -106,78 +98,15 @@ async function fail(res: Response): Promise<never> {
   } catch {
     /* keep the status */
   }
-  if (/invalid login credentials/i.test(detail)) {
-    detail =
-      'No such user in this project. Your supabase.com account is not one — auth users are per-project, so use Create account here first (with any email and password you like).';
-  }
   throw new Error(detail);
 }
 
 /* ---------------------------------------------------------------------- auth */
 
-/**
- * Email and password rather than a magic link.
- *
- * A magic link has to land somewhere, and a side panel is not a redirect target —
- * it would mean a tab, a callback page, and a token handed back across contexts.
- * Password grant is one request and no redirect, which is the right trade for a
- * surface with no address bar.
+/*
+ * Signing in happens in `directory.ts` — there is one project and one account, so
+ * this module only ever renews a session it was handed.
  */
-export async function signIn(c: CloudConfig, email: string, password: string): Promise<Session> {
-  const res = await fetch(auth(c, 'token?grant_type=password'), {
-    method: 'POST',
-    headers: headers(c),
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) await fail(res);
-  const body = (await res.json()) as {
-    access_token: string;
-    refresh_token: string;
-    user?: { id?: string };
-  };
-  return {
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token,
-    email,
-    userId: body.user?.id ?? '',
-  };
-}
-
-export async function signUp(c: CloudConfig, email: string, password: string): Promise<Session> {
-  const res = await fetch(auth(c, 'signup'), {
-    method: 'POST',
-    headers: headers(c),
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) await fail(res);
-  const body = (await res.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    user?: { id?: string };
-  };
-  if (!body.access_token) {
-    /*
-     * A new project has **Confirm email** on by default, so signup returns a user
-     * and no session, and the confirmation link points at the project's Site URL —
-     * which defaults to `http://localhost:3000`, where nothing is running. Clicking
-     * it lands on `error_code=otp_expired`, which reads like the link broke rather
-     * than like a setting needs changing.
-     *
-     * An extension has no address to redirect to, so the honest instruction is to
-     * turn the setting off rather than to pretend the round trip can work.
-     */
-    throw new Error(
-      'Account created, but the project requires email confirmation — and the link points at http://localhost:3000, where nothing is listening. In Supabase: Authentication → Sign In / Providers → Email → turn off "Confirm email", then Sign in here.',
-    );
-  }
-  return {
-    accessToken: body.access_token,
-    refreshToken: body.refresh_token!,
-    email,
-    userId: body.user?.id ?? '',
-  };
-}
-
 export async function refresh(c: CloudConfig, session: Session): Promise<Session> {
   const res = await fetch(auth(c, 'token?grant_type=refresh_token'), {
     method: 'POST',
@@ -415,197 +344,3 @@ export async function syncNow(
   return { pushed: sources.length + chunks.length, pulled, deleted };
 }
 
-/**
- * The SQL to run once in the Supabase editor. Shipped as a string so the setup is
- * in the repo rather than in someone's memory, and shown in the panel.
- *
- * Every table is scoped by `user_id default auth.uid()` with RLS on — that is what
- * makes a public anon key safe. The `vector(384)` and `tsvector` columns are not
- * used by the mirror; they cost nothing now and mean server-side ranking can be
- * added later without a migration or a re-index.
- */
-export const SCHEMA_SQL = `begin;
-
-create extension if not exists vector;
-
--- ---------------------------------------------------------------- tables ----
-
-create table if not exists sources (
-  id text primary key,
-  user_id uuid default auth.uid(),
-  url text not null, title text not null,
-  ingested_at timestamptz not null, stale boolean not null default false,
-  stale_reason text, tags text[] not null default '{}'
-);
-
-create table if not exists chunks (
-  id text primary key,
-  user_id uuid default auth.uid(),
-  source_id text not null, text text not null, ordinal int not null,
-  embedding vector(384), status text not null, conflicts jsonb not null default '[]',
-  ingested_at timestamptz not null, decided_at timestamptz,
-  rejection_reason text, note text,
-  fts tsvector generated always as (to_tsvector('english', text)) stored
-);
-
-create table if not exists deletions (
-  id text primary key,
-  user_id uuid default auth.uid(),
-  kind text not null, at timestamptz not null
-);
-
--- vector(384) and the generated tsvector are not read by the mirror — ranking
--- happens in IndexedDB. They cost nothing now and mean server-side ranking could
--- be added later without a migration or a re-index.
-
--- -------------------------------------------------------------- sessions ----
-
--- A named corpus that may be shared. shared is the whole access decision, which
--- is why nobody but the owner may write this table.
-create table if not exists sessions (
-  id text primary key,
-  user_id uuid not null default auth.uid(),
-  name text not null,
-  shared boolean not null default false,
-  created_at timestamptz default now()
-);
-
-alter table sources   add column if not exists session_id text;
-alter table chunks    add column if not exists session_id text;
-alter table deletions add column if not exists session_id text;
-
--- Solo use is a session of one, so there is no such thing as a row without a
--- session and no null case for a policy or a filter to forget. Rows kept before
--- sessions existed join the personal one here; the default and the not-null then
--- make it impossible to add another.
---
--- ## Why 'personal' gets no row in sessions
---
--- An earlier version of this file seeded one, and it could not work: this script
--- runs in the SQL editor, where there is no signed-in user, so auth.uid() is null
--- and the row failed sessions.user_id's not-null constraint.
---
--- Removing it is the fix rather than a workaround, because the row was never
--- needed. A row in sessions exists to make a session *shareable* — the policies
--- below consult it only through and s.shared. Private rows are reached by
--- user_id = auth.uid(), which needs nothing in that table. So sessions holds
--- exactly the sessions that were deliberately created to be shared, and those are
--- inserted by the panel with a real JWT, where auth.uid() resolves.
-
-update sources   set session_id = 'personal' where session_id is null;
-update chunks    set session_id = 'personal' where session_id is null;
-update deletions set session_id = 'personal' where session_id is null;
-
-alter table sources   alter column session_id set default 'personal';
-alter table chunks    alter column session_id set default 'personal';
-alter table deletions alter column session_id set default 'personal';
-
-alter table sources   alter column session_id set not null;
-alter table chunks    alter column session_id set not null;
-alter table deletions alter column session_id set not null;
-
--- ## Why user_id stops being NOT NULL
---
--- A member of a shared session reaches this project as the **anon** role, holding
--- the owner's publishable key and signed in as nobody — so auth.uid() is null
--- for them, and the column default evaluates to null. With not null in place
--- every write by a member fails, and the error names the column rather than the
--- reason, which is a bad hour waiting to happen.
---
--- So a row is owned either by a person or by a shared session. The constraint
--- below enforces that it is owned by *something*: a row with neither is
--- unreachable by any policy — invisible to the owner, invisible to members, and
--- impossible to delete through the API.
-alter table sources   alter column user_id drop not null;
-alter table chunks    alter column user_id drop not null;
-alter table deletions alter column user_id drop not null;
-
--- An earlier version added *_reachable check constraints here, guarding against a
--- row with neither owner nor session. session_id not null above makes that
--- unreachable by construction, so the checks became tautologies. Dropped rather
--- than left in place: a constraint that cannot fail reads like protection and
--- provides none.
-alter table sources   drop constraint if exists sources_reachable;
-alter table chunks    drop constraint if exists chunks_reachable;
-alter table deletions drop constraint if exists deletions_reachable;
-
--- ------------------------------------------------------------------ RLS ----
-
-alter table sources   enable row level security;
-alter table chunks    enable row level security;
-alter table deletions enable row level security;
-alter table sessions  enable row level security;
-
--- The single-user policies these replace. Dropped by name so the file can be
--- re-run over a project created before sessions existed.
-drop policy if exists own_sources   on sources;
-drop policy if exists own_chunks    on chunks;
-drop policy if exists own_deletions on deletions;
-
-drop policy if exists shared_sources   on sources;
-drop policy if exists shared_chunks    on chunks;
-drop policy if exists shared_deletions on deletions;
-
--- Yours, or in a session you have marked shared. with check repeats using
--- rather than being omitted: for INSERT, Postgres falls back to using when
--- with check is absent, and relying on that makes the write rule invisible to
--- anyone reading the policy.
-create policy shared_sources on sources for all
-  using (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = sources.session_id and s.shared)
-  )
-  with check (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = sources.session_id and s.shared)
-  );
-
-create policy shared_chunks on chunks for all
-  using (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = chunks.session_id and s.shared)
-  )
-  with check (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = chunks.session_id and s.shared)
-  );
-
-create policy shared_deletions on deletions for all
-  using (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = deletions.session_id and s.shared)
-  )
-  with check (
-    user_id = auth.uid()
-    or exists (select 1 from sessions s where s.id = deletions.session_id and s.shared)
-  );
-
--- ## The two policies on sessions, and why the split matters
---
--- shared is the entire access decision for every row above. If a member could
--- write this table, they could flip shared on a session they were never invited
--- to and then read all of it — a privilege escalation reached with nothing but the
--- key they were legitimately given.
---
--- So: the owner manages sessions, and everyone else may only *read* the rows that
--- are already shared, which is the minimum the policies above need in order to
--- evaluate. An anon caller fails user_id = auth.uid() because auth.uid() is
--- null, so the manage policy cannot admit them for INSERT, UPDATE or DELETE.
-drop policy if exists own_sessions on sessions;
-create policy own_sessions on sessions for all
-  using (user_id = auth.uid()) with check (user_id = auth.uid());
-
-drop policy if exists shared_sessions_readable on sessions;
-create policy shared_sessions_readable on sessions for select using (shared);
-
--- --------------------------------------------------------------- indexes ----
-
-create index if not exists chunks_embedding_idx on chunks using hnsw (embedding vector_cosine_ops);
-create index if not exists chunks_fts_idx on chunks using gin (fts);
--- Every policy above filters on session_id, so it is on the hot path of every
--- read a member makes.
-create index if not exists sources_session_idx   on sources (session_id);
-create index if not exists chunks_session_idx    on chunks (session_id);
-create index if not exists deletions_session_idx on deletions (session_id);
-
-commit;`;

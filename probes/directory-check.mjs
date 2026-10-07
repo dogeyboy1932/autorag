@@ -1,37 +1,36 @@
 /**
- * Does the directory project's row-level security actually hold?
+ * Does the one Autorag project's row-level security actually hold, live?
  *
- *   pnpm dir:check          # reads .env2 (the admin/directory project)
+ *   pnpm dir:check          # reads .env (DIRECTORY_URL, DIRECTORY_SECRET_KEY)
  *
- * ## Why this exists as a check and not a one-off curl
+ * ## Why this exists as well as `schema:check`
  *
- * The directory is the only place in Autorag where one person's credentials sit
- * within reach of another person's request. `credentials_for` is `security
- * definer` — it reads rows its caller cannot — so its WHERE clause is the entire
- * access control for the most sensitive thing the system stores. That deserves a
- * test that runs again after every schema edit, not a check someone did once.
+ * `schema:check` proves the SQL is right against a local Postgres. This proves the
+ * *deployed* project is running that SQL — that someone pasted the current file,
+ * that the policies attached, that PostgREST exposes what the clients call. Every
+ * person's passages sit in this project, kept apart by nothing but RLS, so it gets
+ * a test that runs against the real thing after every schema edit.
  *
  * ## Why it signs in rather than using the secret key
  *
  * The secret key bypasses RLS. A check written with it goes green whether or not
- * the policies filter anything at all — and this schema has already shipped one
- * bug (mutually recursive policies, 42P17) that an admin-only read could not see.
- * So every assertion below is made as a real signed-in user holding nothing but
- * the publishable key.
+ * the policies filter anything at all. So every assertion below is made as a real
+ * anonymous user holding nothing but the publishable key; the secret key only
+ * seeds and cleans up.
  *
  * ## Why it seeds data first
  *
  * An empty table returns `[]` to everyone, which is indistinguishable from RLS
- * working. So it creates two sessions owned by user A — one private, one open —
- * and then asks user B what they can see. B seeing exactly one of the two is the
- * assertion; `[]` would prove nothing. Everything it writes, it deletes.
+ * working. So user A keeps passages — personal, in a private session, in a shared
+ * one — and then user B is asked what they can see. Everything it writes, it
+ * deletes, and it counts what it left behind.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const envFile = resolve(here, '..', process.argv.includes('--env') ? process.argv[process.argv.indexOf('--env') + 1] : '.env2');
+const envFile = resolve(here, '..', process.argv.includes('--env') ? process.argv[process.argv.indexOf('--env') + 1] : '.env');
 
 let env;
 try {
@@ -42,84 +41,54 @@ try {
       .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '')]),
   );
 } catch {
-  console.error(`no ${envFile} — the directory project's credentials belong there (see .env.example)`);
+  console.error(`no ${envFile} — the project's credentials belong there (see .env.example)`);
   process.exit(1);
 }
 
-/*
- * DIRECTORY_*, and deliberately without SUPABASE_* as a fallback.
- *
- * There are two Supabase projects in this repo and the generic name does not say
- * which. Accepting both spellings makes that ambiguity permanent and lets a check
- * pass while pointed at the wrong database — the exact failure this naming exists
- * to prevent. One name per thing: SUPABASE_* is the corpus project in .env,
- * DIRECTORY_* is the directory in .env2.
- */
+const mod = readFileSync(resolve(here, '..', 'src/rag/directory.ts'), 'utf8');
+const committed = (k) => mod.match(new RegExp(`${k}: '([^']*)'`))?.[1] ?? '';
+
 const U = env.DIRECTORY_URL?.replace(/\/$/, '');
-const PK = env.DIRECTORY_PUBLISHABLE_KEY;
+// The publishable key is committed by design; `.env` may repeat it but need not.
+const PK = env.DIRECTORY_PUBLISHABLE_KEY || committed('publishableKey');
 const SK = env.DIRECTORY_SECRET_KEY;
-if (!U || !PK || !SK) {
-  const missing = [
-    !U && 'DIRECTORY_URL',
-    !PK && 'DIRECTORY_PUBLISHABLE_KEY',
-    !SK && 'DIRECTORY_SECRET_KEY',
-  ].filter(Boolean);
-  console.error(`${envFile} is missing ${missing.join(', ')} — see .env2.example.`);
-  if (env.SUPABASE_URL || env.SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_SECRET_KEY) {
-    console.error(
-      'It has SUPABASE_* names instead. Those mean the corpus project; the directory uses ' +
-        'DIRECTORY_* so a deploy cannot point the two at each other. Rename them.',
-    );
-  }
+if (!U || !SK) {
+  const missing = [!U && 'DIRECTORY_URL', !SK && 'DIRECTORY_SECRET_KEY'].filter(Boolean);
+  console.error(`${envFile} is missing ${missing.join(', ')} — see .env.example.`);
   process.exit(1);
 }
 
 /*
- * The committed copy has to be the project this check just exercised.
+ * The committed copy has to be the project this check is about to exercise.
  *
- * src/rag/directory.ts carries the directory's URL and publishable key so the
- * extension can reach it, and .env2 carries the same pair for tooling. If they
- * drift, this suite proves one project is safe while every user talks to another
- * — the most reassuring possible way to be wrong. Compared, never printed.
+ * src/rag/directory.ts carries the URL and publishable key every client uses, and
+ * `.env` carries the URL for tooling. If they drift, this suite proves one project
+ * is safe while every user talks to another — the most reassuring possible way to
+ * be wrong. Compared, never printed.
  */
 {
-  const mod = readFileSync(resolve(here, '..', 'src/rag/directory.ts'), 'utf8');
-  const got = (k) => mod.match(new RegExp(`${k}: '([^']*)'`))?.[1] ?? '';
-  const modUrl = got('url');
-  const modKey = got('publishableKey');
-
   /*
-   * Only quoted values count, not mentions.
-   *
-   * The first version grepped the whole file for the prefix and failed on the doc
-   * comment that warns against pasting one; the second still matched it, because
-   * that comment writes the prefix in markdown backticks. Requiring real key
-   * characters after the prefix distinguishes a pasted credential from the
-   * sentence telling you not to paste one. A check that rejects a correct file
-   * teaches people to ignore it, which is worse than the hole it guards.
+   * Only quoted values count, not mentions: the doc comment that warns against
+   * pasting a secret key writes its prefix too, and a check that rejects a correct
+   * file teaches people to ignore it.
    */
   if (/['"`]sb_secret_[A-Za-z0-9_-]{8,}/.test(mod)) {
     console.error('FAIL  src/rag/directory.ts assigns a secret key. It bypasses RLS; remove it.');
     process.exit(1);
   }
-
-  if (modUrl.includes('REPLACE_ME') || modKey.includes('REPLACE_ME')) {
+  if (committed('url').includes('REPLACE_ME') || committed('publishableKey').includes('REPLACE_ME')) {
+    console.error('FAIL  src/rag/directory.ts still has its placeholder URL or key.');
+    process.exit(1);
+  }
+  if (committed('url').replace(/\/$/, '') !== U || committed('publishableKey') !== PK) {
     console.error(
-      'FAIL  src/rag/directory.ts still has its placeholder. Paste the directory\n' +
-        "      project's URL and sb_publishable_ key into it (never the secret key).",
+      'FAIL  src/rag/directory.ts does not match .env — every client would talk to a\n' +
+        '      different project than this check is about to verify.',
     );
     process.exit(1);
   }
-  if (modUrl.replace(/\/$/, '') !== U || modKey !== PK) {
-    console.error(
-      'FAIL  src/rag/directory.ts does not match .env2 — the extension would talk to a\n' +
-        '      different project than this check just verified.',
-    );
-    process.exit(1);
-  }
-  // Not a counted assertion — a precondition. Printing PASS here would make the
-  // tally at the bottom disagree with the number of PASS lines above it.
-  console.log('ok    committed directory config matches the project under test');
+  // A precondition, not a counted assertion.
+  console.log('ok    committed project config matches the project under test');
 }
 
 let pass = 0;
@@ -137,7 +106,7 @@ const ok = (cond, name, note = '') => {
 const json = async (res) => {
   const text = await res.text();
   try {
-    return JSON.parse(text);
+    return text ? JSON.parse(text) : null;
   } catch {
     return text;
   }
@@ -152,6 +121,7 @@ const asUser = (token, path, init = {}) =>
     ...init,
     headers: { apikey: PK, Authorization: `Bearer ${token}`, 'content-type': 'application/json', ...init.headers },
   }).then(json);
+const count = (rows) => (Array.isArray(rows) ? rows.length : `ERR ${JSON.stringify(rows)}`);
 
 const signInAnonymously = () =>
   fetch(`${U}/auth/v1/signup`, {
@@ -160,14 +130,12 @@ const signInAnonymously = () =>
     body: '{}',
   }).then(json);
 
-const codes = (rows) => (Array.isArray(rows) ? rows.map((r) => r.code).sort().join(',') : `ERR ${JSON.stringify(rows)}`);
-
 const A = await signInAnonymously();
 const B = await signInAnonymously();
-if (!A.access_token || !B.access_token) {
+if (!A?.access_token || !B?.access_token) {
   console.error(
     'could not create an anonymous user. Enable anonymous sign-ins under ' +
-      `Authentication → Sign In / Providers. Provider said: ${A.msg ?? B.msg ?? JSON.stringify(A)}`,
+      `Authentication → Sign In / Providers. Provider said: ${A?.msg ?? B?.msg ?? JSON.stringify(A)}`,
   );
   process.exit(1);
 }
@@ -175,63 +143,90 @@ const idA = A.user.id;
 const idB = B.user.id;
 ok(A.user.is_anonymous === true, 'anonymous sign-in is enabled');
 
+const source = (id, session_id) => ({
+  id,
+  session_id,
+  url: `https://probe.example.com/${id}`,
+  title: `probe ${id}`,
+  ingested_at: new Date().toISOString(),
+});
+
 try {
-  await admin('/rest/v1/profiles', {
+  // Sessions are seeded as their owner would create them: with A's own token.
+  const made = await asUser(A.access_token, '/rest/v1/sessions', {
     method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify({
-      user_id: idA,
-      email: 'owner-probe@example.com',
-      project_url: 'https://probe.example.com',
-      anon_key: 'probe-key-A',
-    }),
-  });
-  await admin('/rest/v1/sessions', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates' },
+    headers: { Prefer: 'return=representation' },
     body: JSON.stringify([
-      { code: 'PROBEPRIV', owner_user_id: idA, name: 'private probe', open_join: false },
-      { code: 'PROBEOPEN', owner_user_id: idA, name: 'open probe', open_join: true },
+      { code: 'PROBEPRIV', owner_user_id: idA, name: 'private probe', open_join: false, shared: false },
+      { code: 'PROBESHAR', owner_user_id: idA, name: 'shared probe', open_join: false, shared: true },
+      { code: 'PROBEOPEN', owner_user_id: idA, name: 'open probe', open_join: true, shared: false },
     ]),
   });
-  const seeded = await admin('/rest/v1/sessions?select=code&code=in.(PROBEPRIV,PROBEOPEN)');
-  ok(seeded.length === 2, 'the seed landed, so the reads below have something to hide', `seeded ${seeded.length}`);
+  ok(count(made) === 3, 'an account can create its own sessions', JSON.stringify(made));
 
-  // 42P17: mutually recursive policies. A hard 500 on every read of either table.
-  for (const t of ['sessions', 'invites']) {
+  const kept = await asUser(A.access_token, '/rest/v1/sources', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify([
+      source('src_probe_personal', 'personal'),
+      source('src_probe_priv', 'PROBEPRIV'),
+      source('src_probe_shar', 'PROBESHAR'),
+    ]),
+  });
+  ok(count(kept) === 3, 'an account can keep passages, personal and in its sessions', JSON.stringify(kept));
+  ok(Array.isArray(kept) && kept.every((r) => r.user_id === idA), 'a passage is stamped with whoever kept it');
+
+  // 42P17: mutually recursive policies. A hard 500 on every read of the table.
+  for (const t of ['sessions', 'invites', 'sources', 'chunks', 'deletions']) {
     const r = await asUser(B.access_token, `/rest/v1/${t}?select=*&limit=1`);
-    ok(r?.code !== '42P17', `${t} reads without recursing through its own policy`, JSON.stringify(r));
+    ok(Array.isArray(r), `${t} reads without error`, JSON.stringify(r));
   }
 
-  const bSees = codes(await asUser(B.access_token, '/rest/v1/sessions?select=code&open_join=is.false'));
-  const aSees = codes(await asUser(A.access_token, '/rest/v1/sessions?select=code'));
-  ok(bSees === '', 'open sessions are not listed to ordinary users', `saw [${bSees}]`);
-  ok(aSees === 'PROBEOPEN,PROBEPRIV', 'the owner sees both of their own sessions', `saw [${aSees}]`);
+  const bPersonal = await asUser(B.access_token, '/rest/v1/sources?select=id&id=eq.src_probe_personal');
+  ok(count(bPersonal) === 0, "nobody else can read a person's personal passages", `saw ${count(bPersonal)}`);
 
-  const open = await asUser(B.access_token, '/rest/v1/rpc/credentials_for', {
-    method: 'POST',
-    body: JSON.stringify({ session_code: 'PROBEOPEN' }),
-  });
-  const priv = await asUser(B.access_token, '/rest/v1/rpc/credentials_for', {
-    method: 'POST',
-    body: JSON.stringify({ session_code: 'PROBEPRIV' }),
-  });
+  const bPriv = await asUser(B.access_token, '/rest/v1/sources?select=id&session_id=eq.PROBEPRIV');
+  ok(count(bPriv) === 0, "an uninvited person cannot read a private session's passages", `saw ${count(bPriv)}`);
+
+  const bShar = await asUser(B.access_token, '/rest/v1/sources?select=id&session_id=eq.PROBESHAR');
+  ok(count(bShar) === 1, 'a shared session is readable by anyone holding its code', `saw ${count(bShar)}`);
+
+  const listed = await asUser(B.access_token, '/rest/v1/sessions?select=code&open_join=is.true&code=like.PROBE*');
   ok(
-    Array.isArray(open) && open[0]?.anon_key === 'probe-key-A',
-    "credentials_for releases the open session's key",
-    JSON.stringify(open),
-  );
-  ok(
-    Array.isArray(priv) && priv[0]?.anon_key === 'probe-key-A',
-    'credentials_for accepts a valid private join code',
-    JSON.stringify(priv),
+    Array.isArray(listed) && listed.map((r) => r.code).join() === 'PROBEOPEN',
+    'only the open session is listed to a stranger',
+    JSON.stringify(listed),
   );
 
-  const forged = await asUser(B.access_token, '/rest/v1/sessions', {
+  const intoOpen = await asUser(B.access_token, '/rest/v1/sources', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(source('src_probe_b_open', 'PROBEOPEN')),
+  });
+  ok(count(intoOpen) === 1, 'anyone can keep into an open session', JSON.stringify(intoOpen));
+
+  const intoPriv = await asUser(B.access_token, '/rest/v1/sources', {
+    method: 'POST',
+    body: JSON.stringify(source('src_probe_b_priv', 'PROBEPRIV')),
+  });
+  ok(intoPriv?.code === '42501', 'an uninvited person cannot keep into a private session', JSON.stringify(intoPriv));
+
+  const forgedSession = await asUser(B.access_token, '/rest/v1/sessions', {
     method: 'POST',
     body: JSON.stringify({ code: 'PROBEEVIL', owner_user_id: idA, name: 'forged' }),
   });
-  ok(forged?.code === '42501', 'a stranger cannot create a session owned by someone else', JSON.stringify(forged));
+  ok(forgedSession?.code === '42501', 'nobody can create a session owned by someone else', JSON.stringify(forgedSession));
+
+  await asUser(B.access_token, '/rest/v1/sessions?code=eq.PROBEPRIV', {
+    method: 'PATCH',
+    body: JSON.stringify({ shared: true, open_join: true }),
+  });
+  const flags = await admin('/rest/v1/sessions?select=shared,open_join&code=eq.PROBEPRIV');
+  ok(
+    Array.isArray(flags) && flags[0] && !flags[0].shared && !flags[0].open_join,
+    'a non-owner cannot open up a private session',
+    `ESCALATION: ${JSON.stringify(flags)}`,
+  );
 
   const capped = await asUser(B.access_token, '/rest/v1/demo_usage', {
     method: 'POST',
@@ -240,9 +235,9 @@ try {
   ok(capped?.code === '42501', 'the demo cap cannot be written by the people it caps', JSON.stringify(capped));
 } finally {
   // Runs even when an assertion throws, so a failed run does not leave rows that
-  // make the next one lie.
-  await admin('/rest/v1/sessions?code=in.(PROBEPRIV,PROBEOPEN,PROBEEVIL)', { method: 'DELETE' });
-  await admin(`/rest/v1/profiles?user_id=eq.${idA}`, { method: 'DELETE' });
+  // make the next one lie. Deleting the users cascades to anything they kept.
+  await admin('/rest/v1/sources?id=like.src_probe_*', { method: 'DELETE' });
+  await admin('/rest/v1/sessions?code=in.(PROBEPRIV,PROBESHAR,PROBEOPEN,PROBEEVIL)', { method: 'DELETE' });
   await admin('/rest/v1/demo_usage?key=eq.probe-must-fail', { method: 'DELETE' });
   for (const id of [idA, idB]) {
     await fetch(`${U}/auth/v1/admin/users/${id}`, {
@@ -252,16 +247,10 @@ try {
   }
 }
 
-/*
- * Profiles as well as sessions. This counted only sessions, so a leaked profile
- * row went unnoticed and was later found sitting in the live directory — exactly
- * the residue a cleanup check exists to catch.
- */
 const leftSessions = await admin('/rest/v1/sessions?select=code&code=like.PROBE*');
-const leftProfiles = await admin('/rest/v1/profiles?select=user_id&email=like.*probe*');
+const leftSources = await admin('/rest/v1/sources?select=id&id=like.src_probe_*');
 const left =
-  (Array.isArray(leftSessions) ? leftSessions.length : 0) +
-  (Array.isArray(leftProfiles) ? leftProfiles.length : 0);
+  (Array.isArray(leftSessions) ? leftSessions.length : 0) + (Array.isArray(leftSources) ? leftSources.length : 0);
 console.log(`\ncleanup: ${left} probe row(s) left behind (0 expected)`);
 console.log(`${pass} passed, ${failures.length} failed`);
-process.exit(failures.length ? 1 : 0);
+process.exit(failures.length || left ? 1 : 0);

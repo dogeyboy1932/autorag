@@ -16,7 +16,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { SCHEMA_SQL } from '@/src/rag/sync';
 import { OUTSIDE_MEMORY_NOTICE, splitOutsideMemory } from '@/src/rag/answer';
 import { PERSONAL } from '@/src/rag/sessions';
 import Sessions, { type SessionsApi, type SessionSummary } from '@/components/Sessions';
@@ -953,7 +952,7 @@ function AnswerSettings({
 
 /* ------------------------------------------------------------------- cloud */
 
-const EMPTY_CLOUD: CloudSettings = { url: '', anonKey: '' };
+const EMPTY_CLOUD: CloudSettings = {};
 
 /**
  * The stored settings, kept current.
@@ -1000,228 +999,6 @@ function useCloud(): [CloudSettings, (next: CloudSettings) => void] {
   }, []);
 
   return [cloud, save];
-}
-
-/**
- * Memory mode: this device, or this device and every other one you sign into.
- *
- * Local is the default and stays free, offline and private. Cloud is opt-in with
- * the person's own project and their own bill — the same bargain as the answering
- * key, and for the same reason: we are not billed for someone else's convenience,
- * and their data is genuinely theirs.
- */
-function Memory({
-  cloud,
-  save,
-  onSynced,
-}: {
-  cloud: CloudSettings;
-  save: (next: CloudSettings) => void;
-  onSynced: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [url, setUrl] = useState(cloud.url);
-  const [key, setKey] = useState(cloud.anonKey);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<React.ReactNode>(null);
-  /*
-   * Open by default for anyone who has not configured a project yet.
-   *
-   * These steps used to be behind a link, which is the wrong default: the person
-   * who needs them is precisely the person who does not yet know they exist, and
-   * without running the script first, Sign in can only fail. Someone returning to
-   * a configured panel gets it collapsed, because for them it is noise.
-   */
-  const [showSql, setShowSql] = useState(!cloud.url);
-  const [copied, setCopied] = useState(false);
-
-  const signedIn = Boolean(cloud.accessToken);
-
-  async function connect(create: boolean) {
-    setBusy(create ? 'creating' : 'signing in');
-    setMsg(null);
-    const next = { ...cloud, url: url.trim(), anonKey: key.trim() };
-    /*
-     * Attaches a project. It does not create an account, and that distinction is
-     * what was broken here.
-     *
-     * This used to call `cloudSignIn`, which signed into the project *and* tried to
-     * make a matching directory account from the same password. Once the two were
-     * separated those passwords stopped being the same thing, so the directory half
-     * failed — usually with "already registered" — and left the panel with a
-     * working project and no identity. Creating a session then failed with "Sign in
-     * first" while the person was demonstrably signed in to their project, and no
-     * profile was ever published, so any session they did make resolved to nothing
-     * for everyone they gave the code to.
-     *
-     * Identity comes from the web app and arrives already mirrored. This only needs
-     * the project.
-     */
-    const res = await askDetailed<{
-      url: string;
-      anonKey: string;
-      accessToken: string;
-      refreshToken: string;
-      userId: string;
-    }>({
-      kind: 'attachProject',
-      url: url.trim(),
-      anonKey: key.trim(),
-      email: email.trim(),
-      password,
-      create,
-    });
-    setBusy(null);
-    if (!res.ok) return setMsg(res.error);
-    const connected = { ...next, ...res.data };
-    save(connected);
-    setPassword('');
-    // Push immediately rather than leaving it to a button. Signing in and seeing
-    // an empty table is indistinguishable from sync being broken.
-    setBusy('syncing');
-    const first = await askDetailed<{ pushed: number; pulled: number }>({
-      kind: 'sync',
-      cloud: connected,
-    });
-    setBusy(null);
-    setMsg(
-      <>
-        {first.ok
-          ? `Signed in and synced — ${first.data.pushed} row(s) up, ${first.data.pulled} down.`
-          : `Signed in, but the first sync failed: ${first.error}`}
-        {/*
-          Said out loud rather than left to be discovered. Without a directory
-          account nothing about the corpus is broken, but every session this
-          person creates resolves to nothing for everyone they give the code to —
-          and they would have no way to tell that from the other side.
-        */}
-
-      </>,
-    );
-    onSynced();
-  }
-
-  return (
-    <section>
-      <h2>
-        Memory <span className="soft">{signedIn ? cloud.email : 'this device'}</span>
-      </h2>
-      <div className="card">
-          <p className="note">
-            {signedIn
-              ? 'Your memory syncs to your Supabase project — sign in on another browser and it is there.'
-              : 'Local by default: free, offline, nothing leaves this machine. Connect a Supabase project and your memory follows you to any device you sign into.'}
-          </p>
-          {/*
-            Said before anything is uploaded, in these words, because it is a
-            larger step than the answering key: that sends a question and the few
-            passages it retrieved. This sends everything you have ever kept.
-          */}
-          {!signedIn && (
-            <p className="note bad">
-              Cloud mode uploads your <strong>whole corpus</strong>, including everything kept
-              before you switch — not just what a question retrieves.
-            </p>
-          )}
-          {!signedIn && (
-            <>
-              <div className="row">
-                <input placeholder="https://xxxx.supabase.co" value={url} onChange={(e) => setUrl(e.target.value)} />
-              </div>
-              <div className="row">
-                <input placeholder="anon public key" value={key} onChange={(e) => setKey(e.target.value)} />
-              </div>
-              <div className="row">
-                {/*
-                  The project's own login, prefilled from the account. Usually the
-                  same address — most people sign up for both with one email — but
-                  it need not be: the project may predate the account or sit on a
-                  work address. Prefilled so the common case is not retyped, and
-                  editable so the uncommon one is not a dead end.
-                */}
-                <input
-                  placeholder="email for this project"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <div className="row">
-                <input
-                  type="password"
-                  placeholder="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <div className="row">
-                <button className="primary" onClick={() => void connect(false)} disabled={busy !== null}>
-                  {busy === 'signing in' ? '…' : 'Sign in'}
-                </button>
-                <button onClick={() => void connect(true)} disabled={busy !== null}>
-                  {busy === 'creating' ? '…' : 'Create account'}
-                </button>
-                <button className="linky inline" onClick={() => setShowSql(!showSql)}>
-                  {showSql ? 'hide setup steps' : 'first time? setup steps'}
-                </button>
-              </div>
-              {showSql && (
-                <>
-                  {/*
-                    Both of these were discovered by failing, which is the wrong way
-                    round. The account confusion produces "Invalid login
-                    credentials" — accurate and useless — and the confirmation
-                    default sends you to a localhost:3000 link that nothing serves.
-                  */}
-                  <p className="note">
-                    <strong>1.</strong> In Supabase → SQL editor, run the script below.
-                    <br />
-                    <strong>2.</strong> Authentication → Sign In / Providers → Email → turn
-                    off <strong>Confirm email</strong>. An extension has no address for a
-                    confirmation link to return to; left on, the link points at{' '}
-                    <code>localhost:3000</code> and fails.
-                    <br />
-                    <strong>3.</strong> Use <strong>Create account</strong> below with any
-                    email and password. This is a user <em>inside your project</em> — not
-                    your supabase.com login, which does not exist here.
-                  </p>
-                  <textarea className="preview" readOnly value={SCHEMA_SQL} style={{ height: 160 }} />
-                  {/*
-                    A copy button rather than leaving people to select 30 lines
-                    inside a scrolling textarea, where missing the last line
-                    produces a project that is silently short an index.
-                  */}
-                  <div className="row">
-                    <button
-                      onClick={() => {
-                        void navigator.clipboard.writeText(SCHEMA_SQL).then(() => {
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 2000);
-                        });
-                      }}
-                    >
-                      {copied ? 'Copied' : 'Copy SQL'}
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-          {signedIn && (
-            <div className="row">
-              <button
-                className="danger"
-                onClick={() => save({ url: cloud.url, anonKey: cloud.anonKey, directory: cloud.directory, email: cloud.email })}
-              >
-                Detach project
-              </button>
-            </div>
-          )}
-          {msg && <p className="note">{msg}</p>}
-      </div>
-    </section>
-  );
 }
 
 /* ------------------------------------------------------------------ recall */
@@ -1805,12 +1582,12 @@ function AccountGate({
      * Personal is named outright. A blank space says "no session", and the reader
      * has to already know that means their own corpus.
      */
-    const session = cloud?.host?.name ?? cloud?.sessionId ?? PERSONAL;
+    const session = cloud?.sessionId ?? PERSONAL;
     return (
       <p className="note">
         Signed in as <strong>{account.demo ? 'demo account' : account.email || 'guest'}</strong>
         {' · '}
-        <span className={cloud?.host ? 'session-chip shared' : 'session-chip'}>
+        <span className={session === PERSONAL ? 'session-chip' : 'session-chip shared'}>
           {session === PERSONAL ? 'personal' : session}
         </span>
       </p>
@@ -1909,10 +1686,7 @@ function PanelSessions({
         return res.data;
       },
       join: async (code) => {
-        const res = await askDetailed<{
-          code: string;
-          host: { url: string; anonKey: string; name: string };
-        }>({ kind: 'joinSession', cloud, code });
+        const res = await askDetailed<{ code: string; name: string }>({ kind: 'joinSession', cloud, code });
         if (!res.ok) throw new Error(res.error);
         return res.data;
       },
@@ -1921,25 +1695,7 @@ function PanelSessions({
         if (!res.ok) throw new Error(res.error);
       },
       switchTo: async (target) => {
-        /*
-         * Find out where the session lives before syncing it.
-         *
-         * The switcher lists sessions this person hosts alongside sessions they
-         * were invited to, and a row is only a code. Assuming the attached project
-         * was the bug: switching to somebody else's session queried *your* database
-         * for their session id, found nothing, and showed an empty corpus with no
-         * error at all. Having a project of your own does not make a joined session
-         * yours; only the directory knows which is which.
-         *
-         * `joinSession` is the lookup — redeeming a code and switching to it are
-         * the same question about credentials — and it is skipped when the caller
-         * has already done it.
-         */
-        // The normal session list is owner-filtered, so listed sessions are local.
-        // Only join-by-code supplies an external host.
-        const host = target?.host;
-
-        const next: CloudSettings = { ...cloud, sessionId: target?.id, host };
+        const next: CloudSettings = { ...cloud, sessionId: target?.id };
         save(next);
         /*
          * Tell the mirrored account too, not just `cloud`.
@@ -1950,31 +1706,15 @@ function PanelSessions({
          * to is the one thing here that must never be misreported.
          */
         if (account) {
-          await ask({
-            kind: 'setAccount',
-            account: { ...account, sessionId: target?.id, host },
-          });
+          await ask({ kind: 'setAccount', account: { ...account, sessionId: target?.id } });
         }
         /*
-         * Switching always reconciles — that is the point of switching — but what
-         * silence means depends entirely on which session you moved to.
-         *
-         * Personal with nothing attached: quiet. The passages are already on this
-         * device and there is nothing anywhere to fetch. Reporting "no corpus to
-         * sync" there would be an error message about a working state.
-         *
-         * A *named* session with nothing attached: say so, loudly. That corpus
-         * lives in a database, and with no credentials to reach it the panel can
-         * only show an empty session — which looks exactly like a session that is
-         * empty. This codebase has now produced that same indistinguishable pair
-         * three times, and the cure is never to let it be silent.
+         * A guest switching back to personal: quiet, the passages are already here.
+         * A named session without an account: say so, because an empty session and
+         * an unreachable one look identical on screen.
          */
-        if (!next.accessToken && !next.host) {
-          if (target?.id) {
-            throw new Error(
-              `${target.id} lives in a Supabase project and this browser has no credentials for it, so there is nothing to show. Open the web app while signed in — that hands the extension your project — or attach one under Project setup.`,
-            );
-          }
+        if (!next.directory) {
+          if (target?.id) throw new Error(`Sign in on the web app to open ${target.id}.`);
           return { pulled: 0 };
         }
         const res = await askDetailed<{ pulled: number }>({ kind: 'sync', cloud: next });
@@ -1990,10 +1730,7 @@ function PanelSessions({
       <Sessions
         api={api}
         activeSessionId={cloud.sessionId ?? PERSONAL}
-        hostedName={cloud.host?.name}
-        hostProject={cloud.host}
-        /* Either door: attached in this panel, or mirrored from the web app. */
-        canHost={Boolean(cloud.url && cloud.anonKey && cloud.accessToken)}
+        canCreate={Boolean(account?.directory && !account.demo)}
         signedIn={Boolean(account?.directory)}
         onChanged={onChanged}
       />
@@ -2193,10 +1930,6 @@ function App() {
           <summary>Activity</summary>
           <Activity />
         </details>
-        <details className="fold settings-fold">
-          <summary>Project setup <span className="soft">optional</span></summary>
-          <Memory cloud={cloud} save={saveCloud} onSynced={refresh} />
-        </details>
       </div>
 
       {/*
@@ -2208,16 +1941,18 @@ function App() {
       <footer>
         {/* Sync is a background job with no surface of its own, so "did it work?"
             had no answer short of opening Supabase. */}
-        {cloud.accessToken && <SyncStatus />}
+        {cloud.directory && <SyncStatus />}
         <span>
           {stats
             ? `${stats.approved} kept · ${stats.pending} to review · ${stats.source_count} sources`
             : 'reading corpus…'}
         </span>
-        <span className={settings.apiKey ? 'leaves' : ''}>
-          {settings.apiKey
-            ? 'Kept on this machine · only answers leave it'
-            : 'Kept on this machine · nothing is uploaded'}
+        <span className={settings.apiKey || cloud.directory ? 'leaves' : ''}>
+          {cloud.directory
+            ? `Synced to your Autorag account${settings.apiKey ? ' · answers go to Anthropic' : ''}`
+            : settings.apiKey
+              ? 'Kept on this machine · only answers leave it'
+              : 'Kept on this machine · nothing is uploaded'}
         </span>
       </footer>
     </div>

@@ -27,8 +27,8 @@ export default function AccountBar() {
   if (!account) return null;
 
   const who = account.demo ? 'demo' : account.guest ? 'guest' : account.email;
-  const session = account.host?.name ?? account.sessionId ?? PERSONAL;
-  const shared = Boolean(account.host);
+  const session = account.sessionId ?? PERSONAL;
+  const shared = session !== PERSONAL;
 
   return (
     <span className="account-chip">
@@ -38,10 +38,8 @@ export default function AccountBar() {
         className={shared ? 'account-session shared' : 'account-session'}
         title={
           shared
-            ? `You are keeping into ${account.host!.name} — someone else's project. Everyone in this session can read what you approve.`
-            : session === PERSONAL
-              ? 'Your own corpus. Nobody else can see it.'
-              : `Keeping into the session ${session}.`
+            ? `Keeping into the session ${session}. Everyone in it can read what you approve.`
+            : 'Your own corpus. Nobody else can see it.'
         }
       >
         {session === PERSONAL ? 'personal' : session}

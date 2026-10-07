@@ -52,10 +52,12 @@ Claude, which answers from them first and cites each claim. When your memory doe
 cover the question, it answers from its own knowledge — set apart, uncited, under a
 warning that the memory could not help. Search alone is entirely local and free.
 
-**Sharing uses two Supabase projects.** A *corpus* project holds your passages; a
-separate *directory* holds session codes, invites and profiles — never a passage. A
-join code hands out a project's key, so keeping credentials in a second database
-makes the obvious mistake unreachable.
+**One Supabase project, kept apart by RLS.** Accounts, sessions, invites and every
+person's synced passages live in one project (`supabase/autorag.sql`). Everyone —
+real accounts, guests, the demo — reaches it with a JWT of their own, so row-level
+security decides each row by who is asking: personal passages are their author's
+alone, a session's are readable by its owner, its invitees, or anyone holding its
+code if it is shared. Nobody brings a database of their own.
 
 ---
 
@@ -111,10 +113,12 @@ pnpm ext                     # extension → extension/dist
 ## Checks
 
 ```bash
-pnpm typecheck && pnpm sql:check   # types; schema in code vs schema in docs
+pnpm typecheck                     # types
+pnpm schema:check                  # autorag.sql in a local Postgres: migrates, re-applies, RLS holds
 pnpm ext:check                     # 48 assertions, real browser, real extension
-pnpm dir:check                     # directory RLS, as a real anonymous user
-pnpm session:check                 # two profiles, live projects
+pnpm dir:check                     # live project RLS, as real anonymous users
+pnpm ext:sync                      # one account, two browsers: sync, tombstones, containment
+pnpm session:check                 # two people sharing a session, live
 pnpm loop && pnpm bench            # WebMCP conformance; retrieval quality
 ```
 
@@ -128,7 +132,7 @@ src/rag/       the engine — embed · chunk · store · search · screen · ing
 src/webmcp/    tool registry, lifecycle, errors
 app/ components/   web app — three tabs, ReviewQueue is the human gate
 extension/     MV3 — background · offscreen · sidepanel · reader · content scripts
-supabase/      corpus.sql, directory.sql — both idempotent
+supabase/      autorag.sql — the one schema, idempotent
 netlify/       demo answering endpoint
 probes/        browser-driven checks
 lib/           API-DELTA (19 verified spec findings) · TOOL-CONTRACT (schemas)

@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { Button, Field, Panel } from '@/components/ui';
 import {
   directoryConfigured,
+  backend,
   listOpenSessions,
-  resolveSession,
   signInAnonymously,
   accountSignIn,
   accountSignUp,
@@ -15,16 +15,13 @@ import { countByStatus, wipeAll } from '@/src/rag/store';
 import { PERSONAL } from '@/src/rag/sessions';
 
 /**
- * The way in. Four of them, and none requires a Supabase project.
+ * The way in. Three of them, and none asks for anything but what it says.
  *
  * ## The rule this screen exists to enforce
  *
- * An account is an email and a password. That is all. A Supabase project is a
- * *hosting* choice — you need one to keep your own corpus in the cloud, and you
- * need nothing at all to join someone else's session. Sign-in used to demand a
- * project URL and key before it would authenticate anything, which meant the
- * person this was built for could not get an account, and sessions could not be
- * tested by anyone.
+ * An account is an email and a password. That is all — it is also what syncs your
+ * memory, because everyone's corpus lives in Autorag's one project, kept apart by
+ * row-level security. Nobody brings a database of their own any more.
  *
  * ## Why guest and demo are on the same screen as sign-in
  *
@@ -39,21 +36,7 @@ export interface Account {
   demo?: boolean;
   guest?: boolean;
   directory?: { accessToken: string; refreshToken: string; userId: string };
-  /**
-   * The Supabase project this person hosts their own corpus in, if they have one.
-   *
-   * Absent for most people, and that is the normal case: you need a project to
-   * *host* a corpus, never to sign in and never to join someone else's session.
-   */
-  project?: {
-    url: string;
-    anonKey: string;
-    accessToken: string;
-    refreshToken: string;
-    userId: string;
-  };
   sessionId?: string;
-  host?: { url: string; anonKey: string; name: string };
 }
 
 /** The demo corpus, by name rather than by code. */
@@ -73,7 +56,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
    *
    * They need no migrating — they live in IndexedDB tagged `personal` and stay
    * there when you sign in, so a guest who makes an account keeps everything and
-   * it syncs up the moment a project is attached. Worth saying out loud only so
+   * it syncs up the moment they sign in. Worth saying out loud only so
    * nobody hesitates to sign up for fear of losing what they kept.
    *
    * Clearing is offered because someone may genuinely want a clean start, not as
@@ -136,17 +119,8 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
       }
 
       setBusy(`Loading ${demoSession.name}…`);
-      const creds = await resolveSession(demoSession.code, session);
-      if (!creds) {
-        setMsg('The demo corpus would not release its credentials.');
-        return;
-      }
-
-      await syncNow(
-        { url: creds.projectUrl, anonKey: creds.anonKey, sessionId: demoSession.code },
-        { accessToken: creds.anonKey, refreshToken: '', email: '', userId: '' },
-        (m) => setBusy(m),
-      );
+      // The anonymous account's own token: an open session admits it by policy.
+      await syncNow(backend(demoSession.code), session, (m) => setBusy(m));
 
       onSignedIn({
         email: '',
@@ -157,7 +131,6 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
           userId: account.userId,
         },
         sessionId: demoSession.code,
-        host: { url: creds.projectUrl, anonKey: creds.anonKey, name: demoSession.name },
       });
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));
@@ -182,8 +155,8 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
 
       <Panel title={mode === 'in' ? 'Sign in' : 'Create an account'}>
         <p className="note">
-          An email and a password. You do <strong>not</strong> need a Supabase project — that
-          is only for hosting a corpus of your own, and you can add it later.
+          An email and a password. Your memory syncs to your account, so it is there on any
+          browser you sign into.
         </p>
         <div className="auth-form">
           <label className="auth-label" htmlFor="auth-email">Email</label>
@@ -273,7 +246,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
         >
           <p className="note">
             {kept} passage{kept === 1 ? '' : 's'} already kept in this browser. Signing in keeps
-            all of them — they come with you, and sync up once you attach a project. Clear them
+            all of them — they come with you and sync up to your account. Clear them
             only if you want to start over.
           </p>
         </Panel>
@@ -283,7 +256,7 @@ export default function Auth({ onSignedIn }: { onSignedIn: (account: Account) =>
       {msg && <p className="note bad">{msg}</p>}
       {!configured && (
         <p className="note bad">
-          This build has no directory configured, so accounts and demo mode are unavailable.
+          This build has no Supabase project configured, so accounts and demo mode are unavailable.
           Guest mode still works.
         </p>
       )}

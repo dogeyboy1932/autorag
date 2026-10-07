@@ -57,12 +57,9 @@ export default async function handler(request: Request): Promise<Response> {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   /*
-   * Named for the directory, not `SUPABASE_*`, because this project has two
-   * Supabase projects and the generic name is ambiguous between them. The counter
-   * lives in the *directory*; pointed at the corpus project instead it would find
-   * no `demo_usage` table, and the failure would arrive as "the demo is paused"
-   * with nothing saying which database was wrong. Copying .env straight into
-   * Netlify is the obvious thing to do and would have done exactly that.
+   * `DIRECTORY_*` is the Autorag project — the one every client is compiled
+   * against, which holds `demo_usage`. The name predates there being only one
+   * project and is kept so an existing deploy needs no reconfiguring.
    */
   const directoryUrl = process.env.DIRECTORY_URL;
   const directoryKey = process.env.DIRECTORY_SECRET_KEY;

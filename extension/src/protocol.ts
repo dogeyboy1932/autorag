@@ -102,18 +102,11 @@ export type Request =
    */
   | { kind: 'setAccount'; account: AccountState | null }
   | { kind: 'getAccount' }
-  /*
-   * Hosting: attach your own Supabase project. Separate password on purpose — it
-   * authenticates to a different system, and making them match means changing one
-   * silently breaks the other.
-   */
-  | { kind: 'attachProject'; url: string; anonKey: string; password: string; create: boolean; email?: string }
-  | { kind: 'cloudSignIn'; cloud: CloudSettings; email: string; password: string; create: boolean }
   /** Every session this person can reach: their own, invited, and open ones. */
   | { kind: 'listSessions'; cloud: CloudSettings }
-  /** Publish a new shared session backed by this person's own project. */
+  /** Create a shared session, owned by this account. */
   | { kind: 'createSession'; cloud: CloudSettings; name: string; openJoin?: boolean }
-  /** Redeem a code: resolve whose project holds it and start mirroring it. */
+  /** Redeem a code: check the session is reachable and start mirroring it. */
   | { kind: 'joinSession'; cloud: CloudSettings; code: string }
   | { kind: 'inviteToSession'; cloud: CloudSettings; code: string; email: string }
   /** Move between sessions already reachable, including back to personal. */
@@ -141,48 +134,18 @@ export interface AccountState {
    */
   guest?: boolean;
   directory?: { accessToken: string; refreshToken: string; userId: string };
-  /**
-   * The Supabase project this person hosts their own corpus in, if they have one.
-   *
-   * ## Why this has to travel, and what went wrong while it did not
-   *
-   * Sessions are mirrored here and the project was not, which looks harmless — the
-   * panel has its own "Project setup" — and is not. Attaching a project on the web
-   * app left the extension holding a session id with no credentials to reach it,
-   * and the failure was silent in the worst direction: switching to a session you
-   * *own* went down the no-`host` branch of `sync`, matched
-   * `!accessToken || !refreshToken`, and threw. Nothing was pulled, so the panel
-   * showed an empty corpus for a session with passages in it, while the web app
-   * showed the same session full.
-   *
-   * It also made `canHost` false, so the panel asked for a project the person had
-   * already attached, and hid the Sync button that would have said so.
-   *
-   * The tokens are the project's own, and they land in `chrome.storage.local`
-   * beside the ones the panel would store if you attached the project here
-   * instead — the same bar, reached by the other door. `externally_connectable`
-   * names the two origins allowed to send this at all.
-   */
-  project?: {
-    url: string;
-    anonKey: string;
-    accessToken: string;
-    refreshToken: string;
-    userId: string;
-  };
   sessionId?: string;
-  host?: { url: string; anonKey: string; name: string };
 }
 
-/** Where a synced corpus lives. Stored in chrome.storage.local, like the API key. */
+/**
+ * Who is signed in, and which session syncs. Stored in chrome.storage.local.
+ *
+ * There is no destination in here: every sync goes to the one project compiled
+ * into `src/rag/directory.ts`. An older shape carried a project URL, key, a second
+ * set of tokens and a `host`; `normalizeCloud` in the offscreen document drops them.
+ */
 export interface CloudSettings {
-  url: string;
-  anonKey: string;
-  accessToken?: string;
-  refreshToken?: string;
   email?: string;
-  /** This person's id in their *own* project — what RLS scopes their rows by. */
-  userId?: string;
   /** Working without an account, on purpose. See `AccountState.guest`. */
   guest?: boolean;
   /**
@@ -193,33 +156,17 @@ export interface CloudSettings {
    * discard it instead of leaving an account nobody can ever sign back into.
    */
   demo?: boolean;
-  /**
-   * The directory account: who this person is for the purpose of owning sessions
-   * and receiving invites.
-   *
-   * Separate from the corpus sign-in above and necessarily so — auth users are
-   * per-project, so the id here is unrelated to the one scoping their passages.
-   * Both are obtained from one email and password, because being asked to hold
-   * two accounts in your head is not a thing this feature is worth.
-   */
+  /** The account's tokens — the only credential sync ever uses. */
   directory?: { accessToken: string; refreshToken: string; userId: string };
   /**
-   * Whose project the active session actually lives in.
-   *
-   * Joining someone else's session means reading and writing *their* database, so
-   * url and anonKey above are not enough on their own. Absent means the session is
-   * this person's own and the credentials above apply.
-   */
-  host?: { url: string; anonKey: string; name: string };
-  /**
-   * The shared session being mirrored; absent means the private corpus.
+   * The shared session being mirrored; absent means the personal corpus.
    *
    * Everything between here and `syncNow` must carry this field. It was dropped
    * twice on the way — once by a destructure in the `sync` handler and once by a
    * hand-built config in `syncWithRenewal` — and the symptom was a sync that
    * reported pushing rows into a session while pushing none, because the engine
-   * quietly fell back to the private scope. Explicit field lists are what made
-   * that possible; if you add a field here, follow it to the call sites.
+   * quietly fell back to the personal scope. If you add a field here, follow it to
+   * the call sites.
    */
   sessionId?: string;
 }

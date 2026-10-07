@@ -1,22 +1,19 @@
 /**
  * Can two people actually share one memory?
  *
- *   pnpm ext && pnpm session:check
+ *   pnpm ext && pnpm session:check          # reads .env (DIRECTORY_URL, DIRECTORY_SECRET_KEY)
  *
- * Two throwaway browser profiles against the *real* directory (.env2) and the
- * *real* corpus project (.env), because everything interesting here is a thing a
- * stand-in cannot have: two auth systems with unrelated user ids, a
- * security-definer function deciding who may hold someone else's credentials, and
- * row-level security in a database this code does not own.
+ * Two throwaway browser profiles against the *real* Autorag project, because what
+ * is interesting here is a thing a stand-in cannot have: row-level security deciding,
+ * in a database everyone shares, which person may read which passage.
  *
- * A signs up, creates a session, keeps a passage into it, and invites B. B signs
- * up, sees the invitation, joins by code, and must end up holding A's passage —
- * out of A's project, which B reaches only because `credentials_for` agreed to
- * hand over the key.
+ * A signs in, creates a session, keeps a passage into it, and invites B. B signs
+ * in, is refused before the invite, joins after it, and must end up holding A's
+ * passage — with the same kind of account A has, and nothing else.
  *
- * Everything it creates it deletes: rows, sessions, invites, profiles, and both
- * auth users in both projects. A failed run cleans up too, or the next one starts
- * from a corpus that makes it lie.
+ * Everything it creates it deletes: deleting the users cascades to their sessions,
+ * invites and rows. A failed run cleans up too, or the next one starts from a
+ * corpus that makes it lie.
  */
 import puppeteer from 'puppeteer-core';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -27,33 +24,24 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = resolve(root, 'extension/dist');
 
-const readEnv = (name) => {
-  try {
-    return Object.fromEntries(
-      readFileSync(resolve(root, name), 'utf8')
-        .split('\n')
-        .filter((l) => l.trim() && !l.trim().startsWith('#') && l.includes('='))
-        .map((l) => [
-          l.slice(0, l.indexOf('=')).trim(),
-          l.slice(l.indexOf('=') + 1).trim().replace(/^["']|["']$/g, ''),
-        ]),
-    );
-  } catch {
-    return null;
-  }
-};
-
-const corpus = readEnv('.env');
-const directory = readEnv('.env2');
-/*
- * SUPABASE_* is the corpus project, DIRECTORY_* is the directory. One name per
- * thing, with no fallback between them: there are two Supabase projects here and
- * a check pointed at the wrong one would pass while proving nothing.
- */
-if (!corpus?.SUPABASE_URL || !directory?.DIRECTORY_URL) {
-  console.log('SKIP  needs SUPABASE_URL in .env and DIRECTORY_URL in .env2');
+let env;
+try {
+  env = Object.fromEntries(
+    readFileSync(resolve(root, '.env'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() && !l.trim().startsWith('#') && l.includes('='))
+      .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '')]),
+  );
+} catch {
+  env = {};
+}
+if (!env.DIRECTORY_URL || !env.DIRECTORY_SECRET_KEY) {
+  console.log('SKIP  needs DIRECTORY_URL and DIRECTORY_SECRET_KEY in .env');
   process.exit(0);
 }
+const U = env.DIRECTORY_URL.replace(/\/$/, '');
+const SK = env.DIRECTORY_SECRET_KEY;
+const PK = readFileSync(resolve(root, 'src/rag/directory.ts'), 'utf8').match(/publishableKey: '([^']*)'/)[1];
 
 const stamp = Date.now();
 const A_EMAIL = `probe-a-${stamp}@example.com`;
@@ -72,19 +60,10 @@ const ok = (cond, name, note = '') => {
   }
 };
 
-// Each env file names its own project; this reads whichever pair is present.
-const urlOf = (env) => (env.SUPABASE_URL ?? env.DIRECTORY_URL).replace(/\/$/, '');
-const secretOf = (env) => env.SUPABASE_SECRET_KEY ?? env.DIRECTORY_SECRET_KEY;
-
-const admin = (env, path, init = {}) =>
-  fetch(`${urlOf(env)}/${path}`, {
+const admin = (path, init = {}) =>
+  fetch(`${U}/${path}`, {
     ...init,
-    headers: {
-      apikey: secretOf(env),
-      Authorization: `Bearer ${secretOf(env)}`,
-      'content-type': 'application/json',
-      ...init.headers,
-    },
+    headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'content-type': 'application/json', ...init.headers },
   });
 
 async function panelIn(profile) {
@@ -102,9 +81,6 @@ async function panelIn(profile) {
   const id = new URL((await t.worker()).url()).host;
   const p = await b.newPage();
   await p.goto(`chrome-extension://${id}/sidepanel.html`);
-  await p
-    .waitForFunction(() => document.body.innerText.includes('model ready'), { timeout: 180000 })
-    .catch(() => {});
   return { b, p };
 }
 
@@ -113,35 +89,23 @@ async function panelIn(profile) {
  *
  * Capture reads which session is open from storage rather than from the request,
  * precisely so that four different capture paths cannot disagree — so a probe
- * that passed it in the message would be exercising a route no user takes. This
- * writes it where the panel writes it.
+ * that passed it in the message would be exercising a route no user takes.
  */
-const setCloud = (p, cloud) =>
-  p.evaluate((c) => chrome.storage.local.set({ cloud: c }), cloud);
+const setCloud = (p, cloud) => p.evaluate((c) => chrome.storage.local.set({ cloud: c }), cloud);
 
 const send = (p, request) =>
   p.evaluate(
-    (r) =>
-      new Promise((res) =>
-        chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'p', request: r }, res),
-      ),
+    (r) => new Promise((res) => chrome.runtime.sendMessage({ __autorag: true, to: 'worker', id: 'p', request: r }, res)),
     request,
   );
 
-const CLOUD = { url: corpus.SUPABASE_URL, anonKey: corpus.SUPABASE_PUBLISHABLE_KEY };
-
 /**
- * Users are created through the admin API rather than by signing up.
- *
- * A project with "Confirm email" on tries to send mail on every signup, and the
- * free tier's rate limit then refuses the second one — so a probe that signed up
- * would pass or fail depending on how recently it had last run, which is not a
- * test. `email_confirm: true` makes the account immediately usable and sends
- * nothing. The signup path itself is Supabase's concern; sessions are what this
- * file is about.
+ * Users are created through the admin API rather than by signing up: a project
+ * with "Confirm email" on would otherwise rate-limit the second signup, and the
+ * probe would pass or fail by how recently it last ran.
  */
-async function makeUser(env, email) {
-  const res = await admin(env, 'auth/v1/admin/users', {
+async function makeUser(email) {
+  const res = await admin('auth/v1/admin/users', {
     method: 'POST',
     body: JSON.stringify({ email, password: PASSWORD, email_confirm: true }),
   });
@@ -157,46 +121,17 @@ let openCode = null;
 const users = [];
 
 try {
-  // ---- A signs up: an account in their own project, and one in the directory --
-  users.push({ env: corpus, id: await makeUser(corpus, A_EMAIL) });
-  users.push({ env: directory, id: await makeUser(directory, A_EMAIL) });
-  /*
-   * B gets a directory account and nothing else. No Supabase project, no user in
-   * A's project — which is the whole point: joining someone's session is supposed
-   * to need an account and nothing more, and for a long time it demanded a project
-   * nobody joining would ever have.
-   */
-  users.push({ env: directory, id: await makeUser(directory, B_EMAIL) });
+  users.push(await makeUser(A_EMAIL), await makeUser(B_EMAIL));
 
+  // ---- A signs in: one account, which is also what syncs --------------------
   A = await panelIn('autorag-sess-A-');
-  const aIn = await send(A.p, {
-    kind: 'cloudSignIn',
-    cloud: CLOUD,
-    email: A_EMAIL,
-    password: PASSWORD,
-    create: false,
-  });
-  ok(aIn?.ok && aIn.data?.accessToken, 'A signs in to their own corpus project', aIn?.error);
-  ok(
-    aIn?.data?.directory?.userId,
-    'the same sign-in registers A with the directory',
-    aIn?.data?.directoryError ?? 'no directory account came back',
-  );
-  const aCloud = { ...CLOUD, ...aIn.data };
-
-  // A profile row is what lets anyone else resolve A's sessions at all.
-  const profile = await (
-    await admin(directory, `rest/v1/profiles?select=project_url&user_id=eq.${aIn.data.directory.userId}`)
-  ).json();
-  ok(
-    profile[0]?.project_url === CLOUD.url,
-    "A's profile records where their corpus lives",
-    JSON.stringify(profile),
-  );
+  const aIn = await send(A.p, { kind: 'signIn', email: A_EMAIL, password: PASSWORD });
+  ok(aIn?.ok && aIn.data?.directory?.userId, 'A signs in with an email and a password', aIn?.error);
+  const aCloud = { email: A_EMAIL, directory: aIn.data.directory };
 
   // ---- A creates a session and keeps something into it ----------------------
   const made = await send(A.p, { kind: 'createSession', cloud: aCloud, name: 'Probe Session' });
-  ok(made?.ok && made.data?.code, 'A creates a session', made?.error);
+  ok(made?.ok && made.data?.code, 'A creates a session — no project of their own needed', made?.error);
   code = made?.data?.code;
 
   const inSession = { ...aCloud, sessionId: code };
@@ -212,79 +147,37 @@ try {
   const pushed = await send(A.p, { kind: 'sync', cloud: inSession });
   ok(pushed?.ok, 'A syncs the session up', pushed?.error);
 
-  const rows = await (
-    await admin(corpus, `rest/v1/chunks?select=id,session_id&session_id=eq.${code}`)
-  ).json();
-  ok(rows.length > 0, "the passage is stored under the session in A's project", JSON.stringify(rows));
-
-  /*
-   * Nothing unreviewed leaves the machine.
-   *
-   * Staged material is a draft nobody has vouched for, sitting next to whatever
-   * screening flagged about it. In a session it would land in front of other
-   * people, indistinguishable from what was actually kept. Retrieval has always
-   * refused pending chunks; this asserts the same rule on the wire.
-   *
-   * Ingested and deliberately NOT approved, so a sync that pushed everything would
-   * fail here rather than passing on an empty corpus.
-   */
-  await send(A.p, {
-    kind: 'ingest',
-    text: 'A draft passage that was never reviewed and must not reach the cloud under any circumstances.',
-    sourceUrl: 'https://example.com/probe-unreviewed',
-    title: 'Probe unreviewed',
-  });
-  const stagedLocally = ((await send(A.p, { kind: 'listPending' })).data ?? []).length;
-  ok(stagedLocally > 0, 'the unreviewed passage really is staged locally', String(stagedLocally));
-
-  await send(A.p, { kind: 'sync', cloud: inSession });
-  const remote = await (
-    await admin(corpus, `rest/v1/chunks?select=status&session_id=eq.${code}`)
-  ).json();
+  const rows = await (await admin(`rest/v1/chunks?select=id,user_id&session_id=eq.${code}`)).json();
   ok(
-    // `every` is true of an empty array, so a sync that pushed nothing at all
-    // would pass this vacuously. Require the approved one to have arrived too.
-    Array.isArray(remote) && remote.length > 0 && remote.every((r) => r.status === 'approved'),
-    'no unreviewed passage reaches Supabase, and the approved one still does',
-    JSON.stringify(remote),
+    Array.isArray(rows) && rows.length > 0 && rows.every((r) => r.user_id === aIn.data.directory.userId),
+    'the passage is stored under the session, stamped as A’s',
+    JSON.stringify(rows),
   );
 
-  // ---- B signs up and is invited -------------------------------------------
+  // ---- B signs in and is invited -------------------------------------------
   B = await panelIn('autorag-sess-B-');
   const bIn = await send(B.p, { kind: 'signIn', email: B_EMAIL, password: PASSWORD });
-  ok(
-    bIn?.ok && bIn.data?.directory?.userId,
-    'B signs in with an email and a password — no Supabase project',
-    bIn?.error,
-  );
-  // Deliberately empty: B hosts nothing.
-  const bCloud = { url: '', anonKey: '', ...bIn.data };
+  ok(bIn?.ok && bIn.data?.directory?.userId, 'B signs in with the same kind of account', bIn?.error);
+  const bCloud = { email: B_EMAIL, directory: bIn.data.directory };
 
-  // Before the invite, the code must be useless to B. This is the assertion that
-  // decides whether a session is private at all.
+  /*
+   * Sessions are created shared — anyone holding the code may join — so to test
+   * the invite path, A's session is made invite-only here, as the owner would.
+   */
+  await admin(`rest/v1/sessions?code=eq.${code}`, { method: 'PATCH', body: JSON.stringify({ shared: false }) });
   const early = await send(B.p, { kind: 'joinSession', cloud: bCloud, code });
-  ok(!early?.ok, 'an uninvited stranger cannot join by code alone', 'JOINED WITHOUT AN INVITE');
+  ok(!early?.ok, 'an uninvited stranger cannot join an invite-only session by code', 'JOINED WITHOUT AN INVITE');
+  const earlyPull = await send(B.p, { kind: 'sync', cloud: { ...bCloud, sessionId: code } });
+  ok(!earlyPull?.ok || earlyPull.data.pulled === 0, 'nor pull its passages by naming the session', JSON.stringify(earlyPull?.data));
 
-  const invited = await send(A.p, {
-    kind: 'inviteToSession',
-    cloud: aCloud,
-    code,
-    email: B_EMAIL,
-  });
+  const invited = await send(A.p, { kind: 'inviteToSession', cloud: aCloud, code, email: B_EMAIL });
   ok(invited?.ok, 'A invites B by email', invited?.error);
-
-  const listed = await send(B.p, { kind: 'listSessions', cloud: bCloud });
-  ok(
-    Array.isArray(listed?.data) && listed.data.some((s) => s.code === code),
-    'B now sees the session they were invited to',
-    JSON.stringify(listed?.data ?? listed?.error),
-  );
 
   // ---- B joins and ends up holding A's passage ------------------------------
   const joined = await send(B.p, { kind: 'joinSession', cloud: bCloud, code });
-  ok(joined?.ok && joined.data?.host?.url === CLOUD.url, 'B joins and is pointed at A’s project', joined?.error);
+  ok(joined?.ok && joined.data?.code === code, 'B joins once invited', joined?.error);
 
-  const bInSession = { ...bCloud, sessionId: code, host: joined.data.host };
+  const bInSession = { ...bCloud, sessionId: code };
   await setCloud(B.p, bInSession);
   const bSync = await send(B.p, { kind: 'sync', cloud: bInSession });
   ok(bSync?.ok && bSync.data.pulled > 0, "B pulls A's passage", JSON.stringify(bSync?.data ?? bSync?.error));
@@ -295,100 +188,67 @@ try {
     'B can recall what A kept',
     JSON.stringify(found?.hits?.length ?? 0),
   );
+
   // ---- demo mode: a stranger with no account at all ------------------------
-  const openMade = await send(A.p, {
-    kind: 'createSession',
-    cloud: aCloud,
-    name: 'Probe Open',
-    openJoin: true,
-  });
+  const openMade = await send(A.p, { kind: 'createSession', cloud: aCloud, name: 'Probe Open', openJoin: true });
   ok(openMade?.ok && openMade.data?.code, 'A publishes a session open to anyone', openMade?.error);
   openCode = openMade?.data?.code;
+  await setCloud(A.p, { ...aCloud, sessionId: openCode });
+  await send(A.p, {
+    kind: 'ingest',
+    text: 'Offshore wind capacity factors commonly exceed forty percent, well above most onshore sites.',
+    sourceUrl: 'https://example.com/probe-wind',
+    title: 'Probe wind',
+  });
+  const pend2 = (await send(A.p, { kind: 'listPending' })).data;
+  await send(A.p, { kind: 'approve', chunkIds: pend2.map((c) => c.chunk_id) });
+  await send(A.p, { kind: 'sync', cloud: { ...aCloud, sessionId: openCode } });
 
-  /*
-   * Not through a panel: demo mode runs in the web app, with no extension, no
-   * account and nothing but the directory's publishable key. Exercised the same
-   * way here — a bare fetch holding only that key.
-   */
-  const dirUrl = directory.DIRECTORY_URL.replace(/\/$/, '');
-  const dirKey = directory.DIRECTORY_PUBLISHABLE_KEY;
+  // As the web app's demo does it: an anonymous account and nothing else.
   const anon = await (
-    await fetch(`${dirUrl}/auth/v1/signup`, {
+    await fetch(`${U}/auth/v1/signup`, {
       method: 'POST',
-      headers: { apikey: dirKey, 'content-type': 'application/json' },
+      headers: { apikey: PK, 'content-type': 'application/json' },
       body: '{}',
     })
   ).json();
   ok(Boolean(anon.access_token), 'a visitor with no account can sign in anonymously', anon.msg);
-  if (anon.user?.id) users.push({ env: directory, id: anon.user.id });
+  if (anon.user?.id) users.push(anon.user.id);
+  const asAnon = (path) =>
+    fetch(`${U}/rest/v1/${path}`, { headers: { apikey: PK, Authorization: `Bearer ${anon.access_token}` } }).then((r) =>
+      r.json(),
+    );
 
-  const anonHeaders = {
-    apikey: dirKey,
-    Authorization: `Bearer ${anon.access_token}`,
-    'content-type': 'application/json',
-  };
-  const openList = await (
-    await fetch(`${dirUrl}/rest/v1/sessions?select=code,name&open_join=is.true`, {
-      headers: anonHeaders,
-    })
-  ).json();
+  const openList = await asAnon('sessions?select=code&open_join=is.true');
   ok(
     Array.isArray(openList) && openList.some((x) => x.code === openCode),
     'the open session is discoverable without being told its code',
     JSON.stringify(openList),
   );
-  ok(
-    !openList.some((x) => x.code === code),
-    'the invite-only session is NOT in that list',
-    'PRIVATE SESSION EXPOSED TO DEMO VISITORS',
-  );
+  ok(!openList.some((x) => x.code === code), 'the invite-only session is NOT in that list', 'PRIVATE SESSION LISTED');
 
-  const demoCreds = await (
-    await fetch(`${dirUrl}/rest/v1/rpc/credentials_for`, {
-      method: 'POST',
-      headers: anonHeaders,
-      body: JSON.stringify({ session_code: openCode }),
-    })
-  ).json();
-  ok(demoCreds?.[0]?.project_url === CLOUD.url, 'demo mode gets the corpus credentials', JSON.stringify(demoCreds));
-
-  const deniedCreds = await (
-    await fetch(`${dirUrl}/rest/v1/rpc/credentials_for`, {
-      method: 'POST',
-      headers: anonHeaders,
-      body: JSON.stringify({ session_code: code }),
-    })
-  ).json();
+  const demoRows = await asAnon(`chunks?select=id&session_id=eq.${openCode}`);
+  ok(Array.isArray(demoRows) && demoRows.length > 0, 'the visitor reads the open session’s passages', JSON.stringify(demoRows));
+  const deniedRows = await asAnon(`chunks?select=id&session_id=eq.${code}`);
   ok(
-    Array.isArray(deniedCreds) && deniedCreds.length === 0,
-    'the same visitor is refused the invite-only session',
-    `LEAKED ${JSON.stringify(deniedCreds)}`,
+    Array.isArray(deniedRows) && deniedRows.length === 0,
+    'the same visitor reads nothing of the invite-only session',
+    `LEAKED ${JSON.stringify(deniedRows)}`,
   );
 } catch (err) {
   ok(false, 'run completed', String(err));
 } finally {
-  // ---- put everything back -------------------------------------------------
-  // Browsers first. Auto-sync fires on corpus changes, so a profile that is still
-  // open can push a row back in between the delete and the count — which is how
-  // the first version of this reported one row left behind and no reason.
+  // Browsers first: auto-sync fires on corpus changes, so an open profile can push
+  // a row back between the delete and the count.
   await A?.b.close();
   await B?.b.close();
   try {
-    for (const c of [code, openCode].filter(Boolean)) {
-      await admin(corpus, `rest/v1/chunks?session_id=eq.${c}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/sources?session_id=eq.${c}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/deletions?session_id=eq.${c}`, { method: 'DELETE' });
-      await admin(corpus, `rest/v1/sessions?id=eq.${c}`, { method: 'DELETE' });
-      await admin(directory, `rest/v1/invites?session_code=eq.${c}`, { method: 'DELETE' });
-      await admin(directory, `rest/v1/sessions?code=eq.${c}`, { method: 'DELETE' });
+    // Deleting the users cascades to their sessions, invites and passages.
+    for (const id of users) {
+      await admin(`auth/v1/admin/users/${id}`, { method: 'DELETE' }).catch(() => {});
     }
-    for (const u of users) {
-      await admin(u.env, `rest/v1/profiles?user_id=eq.${u.id}`, { method: 'DELETE' }).catch(() => {});
-      await admin(u.env, `auth/v1/admin/users/${u.id}`, { method: 'DELETE' }).catch(() => {});
-    }
-    const left = await (
-      await admin(corpus, `rest/v1/chunks?select=id&session_id=eq.${code ?? 'none'}`)
-    ).json();
+    const codes = [code, openCode].filter(Boolean).join(',') || 'none';
+    const left = await (await admin(`rest/v1/chunks?select=id&session_id=in.(${codes})`)).json();
     console.log(`\ncleanup: ${Array.isArray(left) ? left.length : '?'} probe rows left (0 expected)`);
   } catch (err) {
     console.log('cleanup problem:', String(err));

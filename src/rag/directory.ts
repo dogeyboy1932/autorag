@@ -1,33 +1,25 @@
 /**
- * The directory — how one person's session code finds another person's corpus.
+ * Autorag's one Supabase project — accounts, sessions, and everyone's passages.
  *
- * ## What this project is
+ * ## What it holds
  *
- * A phone book, and nothing else. It maps a session code to the Supabase project
- * that actually holds the passages, records who was invited, and counts demo
- * usage. No passage, chunk or embedding is ever stored here. Corpora live in
- * their owners' own projects, which is what lets someone be handed a session
- * without being handed a database.
+ * Who someone is, which sessions exist and who was invited to them, how many demo
+ * answers an address has spent, and the mirrored corpus itself. It used to be only
+ * the first three — a phone book that mapped a session code to the owner's *own*
+ * Supabase project — and members reached that project as the `anon` role with the
+ * owner's key. One project means everybody arrives with a JWT of their own, so
+ * RLS decides every row by who is asking. See `supabase/autorag.sql`.
  *
  * ## Why the key below is in the repo, and why the other one never can be
  *
  * `publishableKey` is committed deliberately. Supabase publishable keys are
  * designed to ship in client code: they grant nothing on their own, and row-level
- * security scopes every row to the caller. There is also no version of this
- * feature where the key stays private — every user's browser has to reach the
- * directory to resolve a code, so it is on every client by necessity, and the
- * extension ships as a zip anyone can unzip and read.
+ * security scopes every row to the caller. Every client has to reach this project,
+ * and the extension ships as a zip anyone can unzip and read.
  *
- * The directory's **secret** key is a different thing entirely: it bypasses RLS
- * and can read every row of `profiles`, which is where other people's project
- * credentials live. It stays in `.env2`, git-ignored, used only by
- * `pnpm dir:check` and the Netlify Function. If you find yourself wanting it in
- * this file, the design has gone wrong.
- *
- * What actually protects this project is asserted by `pnpm dir:check`: signed in
- * as a real anonymous user holding nothing but the key below, a stranger sees an
- * open session and not a private one, and `credentials_for` refuses to hand over
- * the private session's credentials.
+ * The **secret** key bypasses RLS and can read every person's passages. It stays
+ * in `.env`, git-ignored, used only by the probes and the Netlify Function. If you
+ * find yourself wanting it in this file, the design has gone wrong.
  */
 
 import type { CloudConfig, Session } from './sync';
@@ -35,7 +27,7 @@ import type { CloudConfig, Session } from './sync';
 export const DIRECTORY = {
   url: 'https://qkupjhuroorzijbfqdtv.supabase.co',
   /*
-   * Paste the directory project's `sb_publishable_…` key here — never the
+   * Paste the project's `sb_publishable_…` key here — never the
    * `sb_secret_…` one. `pnpm dir:check` fails loudly while this is a placeholder,
    * so an unconfigured build cannot quietly ship.
    */
@@ -44,6 +36,19 @@ export const DIRECTORY = {
 
 export const directoryConfigured = () =>
   !DIRECTORY.url.includes('REPLACE_ME') && !DIRECTORY.publishableKey.includes('REPLACE_ME');
+
+/**
+ * Where a sync goes: always this project, scoped to one session.
+ *
+ * There is no other destination any more, so nothing stores a URL or key for the
+ * corpus — the compiled-in pair is the only one, and a stale stored copy cannot
+ * point a sync somewhere else.
+ */
+export const backend = (sessionId?: string): CloudConfig => ({
+  url: DIRECTORY.url,
+  anonKey: DIRECTORY.publishableKey,
+  ...(sessionId ? { sessionId } : {}),
+});
 
 const url = (path: string) => `${DIRECTORY.url.replace(/\/$/, '')}/${path}`;
 
@@ -66,13 +71,16 @@ async function fail(res: Response): Promise<never> {
   throw new Error(detail);
 }
 
-/** A session as the directory knows it — a name and a code, never any content. */
+/** A session's row: its name and who may use it. Its passages carry `session_id = code`. */
 export interface DirectorySession {
   code: string;
   name: string;
   open_join: boolean;
+  shared: boolean;
   owner_user_id: string;
 }
+
+const SESSION_COLUMNS = 'code,name,open_join,shared,owner_user_id';
 
 /**
  * Signs in without an account, for demo mode.
@@ -91,7 +99,7 @@ export async function signInAnonymously(): Promise<Session> {
     const body = (await res.json().catch(() => ({}))) as { msg?: string };
     if (/anonymous sign-ins are disabled/i.test(body.msg ?? '')) {
       throw new Error(
-        'The directory project has anonymous sign-ins turned off. In Supabase: Authentication → Sign In / Providers → Anonymous sign-ins.',
+        'The Autorag Supabase project has anonymous sign-ins turned off. In Supabase: Authentication → Sign In / Providers → Anonymous sign-ins.',
       );
     }
     throw new Error(body.msg ?? `HTTP ${res.status}`);
@@ -123,10 +131,8 @@ export async function signInAnonymously(): Promise<Session> {
  * intent is information, and guessing past it produced an error message about the
  * opposite of what went wrong.
  *
- * A person has two accounts and should never think about it: one here, which owns
- * sessions and receives invites, and one in their own Supabase project if they
- * host a corpus. Auth users are per-project, so these are genuinely different
- * users that happen to share an email.
+ * One account, in the one project: it owns sessions, receives invites, and is
+ * what every passage's `user_id` refers to.
  */
 async function attempt(path: string, email: string, password: string) {
   const res = await fetch(url(`auth/v1/${path}`), {
@@ -154,7 +160,7 @@ async function attempt(path: string, email: string, password: string) {
  * at a Site URL nothing serves.
  */
 const CONFIRM_EMAIL_HELP =
-  'The directory project has "Confirm email" turned on, so it tries to email a confirmation ' +
+  'The Autorag Supabase project has "Confirm email" turned on, so it tries to email a confirmation ' +
   'link that nothing here can receive. Turn it off: Supabase → Authentication → Sign In / ' +
   'Providers → Email → Confirm email.';
 
@@ -221,30 +227,22 @@ export async function signInOrUp(email: string, password: string): Promise<Sessi
 
 
 /**
- * Turns a session code into the credentials of the project that holds it.
+ * A session the caller may use, by code — or null.
  *
- * Deliberately a function call rather than a select on `profiles`: the rule about
- * who may have someone else's credentials lives in `credentials_for` and nowhere
- * else, so there is one place to read and one place to get it wrong.
- *
- * Returns null for a code that does not exist *and* for one the caller may not
- * have, and that conflation is intentional — distinguishing them would turn this
- * into an oracle for which codes are real.
+ * Asked of `sessions` directly, and RLS is the whole answer: a row is visible only
+ * if the caller owns it, was invited, or it is shared or open. So a code that does
+ * not exist and one the caller may not use both come back empty, and that
+ * conflation is intentional — telling them apart would make this an oracle for
+ * which codes are real.
  */
-export async function resolveSession(
-  code: string,
-  session?: Session,
-): Promise<{ projectUrl: string; anonKey: string } | null> {
-  const res = await fetch(url('rest/v1/rpc/credentials_for'), {
-    method: 'POST',
-    headers: headers(session?.accessToken),
-    body: JSON.stringify({ session_code: code }),
-  });
+export async function findSession(code: string, session: Session): Promise<DirectorySession | null> {
+  const res = await fetch(
+    url(`rest/v1/sessions?select=${SESSION_COLUMNS}&code=eq.${encodeURIComponent(code)}`),
+    { headers: headers(session.accessToken) },
+  );
   if (!res.ok) await fail(res);
-  const rows = (await res.json()) as { project_url: string; anon_key: string }[];
-  const row = rows[0];
-  if (!row?.project_url || !row?.anon_key) return null;
-  return { projectUrl: row.project_url, anonKey: row.anon_key };
+  const rows = (await res.json()) as DirectorySession[];
+  return rows[0] ?? null;
 }
 
 /**
@@ -257,12 +255,12 @@ export async function resolveSession(
  *
  * The `visible_sessions` policy already lets an unauthenticated caller see rows
  * with `open_join`, so this asks the directory what is open instead of being
- * told. Nothing else is visible: a private session is not in this list, and its
- * credentials are not reachable through it.
+ * told. Nothing else is listed: a shared session is reachable by its code, never
+ * by browsing.
  */
 export async function listOpenSessions(session?: Session): Promise<DirectorySession[]> {
   const res = await fetch(
-    url('rest/v1/sessions?select=code,name,open_join,owner_user_id&open_join=is.true'),
+    url(`rest/v1/sessions?select=${SESSION_COLUMNS}&open_join=is.true`),
     { headers: headers(session?.accessToken) },
   );
   if (!res.ok) await fail(res);
@@ -273,7 +271,7 @@ export async function listOpenSessions(session?: Session): Promise<DirectorySess
 export async function listSessions(session: Session): Promise<DirectorySession[]> {
   const res = await fetch(
     url(
-      `rest/v1/sessions?select=code,name,open_join,owner_user_id&owner_user_id=eq.${encodeURIComponent(session.userId)}`,
+      `rest/v1/sessions?select=${SESSION_COLUMNS}&owner_user_id=eq.${encodeURIComponent(session.userId)}`,
     ),
     {
     headers: headers(session.accessToken),
@@ -284,15 +282,12 @@ export async function listSessions(session: Session): Promise<DirectorySession[]
 }
 
 /**
- * Publishes a session so other people can find it.
- *
- * The corpus itself is not touched here. This records that a code exists and who
- * owns it; the passages stay in the owner's project, reachable only once
- * `credentials_for` agrees to hand over its credentials.
+ * Creates a session. One row does the whole job: it names the session, and its
+ * `shared` and `open_join` flags are what every corpus policy reads.
  */
 export async function publishSession(
   session: Session,
-  input: { code: string; name: string; openJoin?: boolean; ownerUserId: string },
+  input: { code: string; name: string; openJoin?: boolean; shared?: boolean; ownerUserId: string },
 ): Promise<void> {
   const res = await fetch(url('rest/v1/sessions'), {
     method: 'POST',
@@ -301,33 +296,8 @@ export async function publishSession(
       code: input.code,
       name: input.name,
       open_join: input.openJoin ?? false,
+      shared: input.shared ?? true,
       owner_user_id: input.ownerUserId,
-    }),
-  });
-  if (!res.ok) await fail(res);
-}
-
-/**
- * Records where this person's own corpus lives, so a session they own can be
- * resolved by someone else.
- *
- * `anonKey` here is the *publishable* key of their own project — the same one
- * they typed into Settings. Handing it to an invitee is the entire mechanism, and
- * it is why an invite is preferred over a code: a code is a bearer token, while
- * an invite releases credentials only to an address the owner named.
- */
-export async function publishProfile(
-  session: Session,
-  input: { userId: string; email: string; cloud: CloudConfig },
-): Promise<void> {
-  const res = await fetch(url('rest/v1/profiles'), {
-    method: 'POST',
-    headers: { ...headers(session.accessToken), Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify({
-      user_id: input.userId,
-      email: input.email,
-      project_url: input.cloud.url,
-      anon_key: input.cloud.anonKey,
     }),
   });
   if (!res.ok) await fail(res);

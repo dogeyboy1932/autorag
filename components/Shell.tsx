@@ -34,19 +34,17 @@ const KEY = 'autorag.account';
  * What the extension is told about the account.
  *
  * Written once rather than at each of the two call sites below, because it was
- * two hand-copied object literals and they drifted: `project` was added to
- * `Account` and reached neither of them, so the panel held a session id it had no
- * credentials to reach and reported an empty corpus for a session full of
- * passages. A field list repeated twice is a field list that will be updated once.
+ * two hand-copied object literals and they drifted: a field added to `Account`
+ * reached neither of them, so the panel held a session id it had no credentials
+ * to reach and reported an empty corpus for a session full of passages. A field
+ * list repeated twice is a field list that will be updated once.
  */
 const mirrored = (a: Account) => ({
   email: a.email,
   demo: a.demo,
   guest: a.guest,
   directory: a.directory,
-  project: a.project,
   sessionId: a.sessionId,
-  host: a.host,
 });
 
 interface AccountContext {

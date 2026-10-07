@@ -31,18 +31,17 @@ import { warmup, warmupState, EMBEDDING_MODEL, EMBEDDING_DIM, isReady, embedOne 
 import { env } from '@huggingface/transformers';
 import { isEnvelope, type CloudSettings, type Event, type Request, type Response } from '../protocol';
 import { askModel, splitOutsideMemory, standaloneQuery } from '@/src/rag/answer';
-import { refresh as refreshSession, signIn, signUp, syncNow } from '@/src/rag/sync';
+import { refresh as refreshSession, syncNow } from '@/src/rag/sync';
 import {
+  backend,
   directoryConfigured,
+  findSession,
   signInAnonymously,
   inviteToSession,
   listSessions,
-  publishProfile,
   publishSession,
-  resolveSession,
   signInOrUp,
 } from '@/src/rag/directory';
-import { createLocalSession } from '@/src/rag/sessions';
 import { emitCorpusChange, onCorpusChange } from '@/src/rag/bus';
 import type { Conflict } from '@/src/types';
 
@@ -166,39 +165,13 @@ async function handle(request: Request): Promise<unknown> {
      * download reports a percentage.
      */
     case 'sync': {
-      const { url, anonKey, accessToken, refreshToken, email, sessionId, host } = request.cloud;
-      setActiveSession(sessionId);
-      /*
-       * A member of someone else's session has no project and no user of their own
-       * in it. They reach it as the **anon** role, holding the publishable key the
-       * session was shared with — which is exactly what a member is, so this is the
-       * member path rather than a way around sign-in.
-       *
-       * Without this, joining was impossible for the people it was built for: the
-       * check below demanded tokens that only a project owner can have, so a joiner
-       * with no Supabase was told they were "not signed in to the cloud memory"
-       * while being perfectly signed in to their account.
-       */
-      if (!host && (!accessToken || !refreshToken)) {
-        throw new Error(
-          'No corpus to sync. Attach your own Supabase project, or join a session to work in someone else\'s.',
-        );
+      const c = normalizeCloud(request.cloud);
+      setActiveSession(c.sessionId);
+      if (!c.directory) {
+        throw new Error('Sign in on the web app to sync — working as a guest keeps everything on this device.');
       }
-      record('working', sessionId ? `Syncing session ${sessionId}` : 'Syncing memory');
-      const result = await syncWithRenewal(
-        host
-          ? {
-              url,
-              anonKey,
-              host,
-              sessionId,
-              email: email ?? '',
-              accessToken: host.anonKey,
-              refreshToken: '',
-            }
-          : { url, anonKey, accessToken, refreshToken, email, sessionId },
-        (message) => record('working', message),
-      );
+      record('working', c.sessionId ? `Syncing session ${c.sessionId}` : 'Syncing memory');
+      const result = await syncWithRenewal(c, (message) => record('working', message));
       record(
         'done',
         `Synced — ${result.pulled} new from other devices, ${result.deleted} removed elsewhere`,
@@ -207,61 +180,9 @@ async function handle(request: Request): Promise<unknown> {
       return result;
     }
 
-    case 'cloudSignIn': {
-      const cfg = { url: request.cloud.url, anonKey: request.cloud.anonKey };
-      const session = request.create
-        ? await signUp(cfg, request.email, request.password)
-        : await signIn(cfg, request.email, request.password);
-
-      /*
-       * Register with the directory in the same breath, and do not fail the
-       * sign-in if it does not work.
-       *
-       * `credentials_for` reads `profiles`, so without a row there nobody can
-       * resolve a session this person hosts — they would create one, hand out the
-       * code, and watch it fail for everyone with no indication why. Publishing it
-       * at sign-in is the only moment we are certainly holding their project's
-       * credentials and their password at once.
-       *
-       * It is best-effort because the directory is a convenience and the corpus is
-       * the product. A directory that is down, paused, or misconfigured must not
-       * stop someone signing in to their own memory; it costs them sessions until
-       * it recovers, and the panel says so rather than pretending.
-       */
-      let directory: { accessToken: string; refreshToken: string; userId: string } | undefined;
-      let note = '';
-      if (directoryConfigured()) {
-        try {
-          const dir = await signInOrUp(request.email, request.password);
-          await publishProfile(dir, {
-            userId: dir.userId,
-            email: request.email,
-            cloud: { url: cfg.url, anonKey: cfg.anonKey },
-          });
-          directory = {
-            accessToken: dir.accessToken,
-            refreshToken: dir.refreshToken,
-            userId: dir.userId,
-          };
-        } catch (err) {
-          note = ` (sessions unavailable: ${err instanceof Error ? err.message : String(err)})`;
-        }
-      }
-      record('done', `Signed in to cloud memory as ${request.email}${note}`);
-      return { ...session, directory, directoryError: note.trim() || undefined };
-    }
-
     /*
-     * Identity, with no Supabase project anywhere in it.
-     *
-     * This is the whole point of the split. Signing in used to demand a project
-     * URL and key before it would authenticate anything, so somebody who only
-     * wanted to join a session — which needs no project of their own — could not
-     * get an account at all.
-     *
-     * No profile is published here. A profile says where a corpus lives, and
-     * someone without a project has nothing to say; it is written by
-     * `attachProject` instead.
+     * Identity. One account in the one project, and it is also what syncs: there
+     * is no second sign-in for a corpus any more.
      */
     case 'signIn':
     case 'signUp': {
@@ -298,90 +219,18 @@ async function handle(request: Request): Promise<unknown> {
       return { ok: true };
     }
 
-    /*
-     * Hosting. Optional, and only for the person whose corpus it is.
-     *
-     * The profile is published here rather than at sign-in because this is the
-     * first moment there is anything true to publish — without it, a session this
-     * person hosts would resolve to nothing for everyone they gave the code to.
-     */
-    case 'attachProject': {
-      const cfg = { url: request.url, anonKey: request.anonKey };
-      /*
-       * The project's login, which need not be the account's address. Falls back
-       * to the account email, which is right for almost everybody.
-       */
-      const account = await storage.get<CloudSettings>('cloud');
-      const email = request.email?.trim() || account?.email || '';
-      if (!email) throw new Error('Sign in on the web app first — a project is attached to an account.');
-      const project = request.create
-        ? await signUp(cfg, email, request.password)
-        : await signIn(cfg, email, request.password);
-
-      const dir = account?.directory;
-      if (dir) {
-        /*
-         * The profile records the *account* email, never the project login.
-         * Invites are matched against the account address, so writing the other
-         * one here would land an invitation somewhere the invitee never looks.
-         */
-        const accountEmail = account?.email || email;
-        await publishProfile(
-          { accessToken: dir.accessToken, refreshToken: dir.refreshToken, email: accountEmail, userId: dir.userId },
-          { userId: dir.userId, email: accountEmail, cloud: cfg },
-        );
-      }
-      record('done', `Attached ${new URL(cfg.url).host}`);
-      return {
-        url: cfg.url,
-        anonKey: cfg.anonKey,
-        accessToken: project.accessToken,
-        refreshToken: project.refreshToken,
-        userId: project.userId,
-      };
-    }
-
     case 'setAccount': {
-      const current = (await storage.get<CloudSettings>('cloud')) ?? { url: '', anonKey: '' };
       const a = request.account;
-      /*
-       * A project attached on the web app is a project attached here.
-       *
-       * `CloudSettings` keeps the project's credentials flat — `url`, `anonKey`,
-       * `accessToken`, `refreshToken`, `userId` — because that is what `sync` and
-       * `syncWithRenewal` read. The web app nests them under `project`, so this is
-       * where the two shapes meet.
-       *
-       * Only overwritten when the account actually carries one. Signing in on the
-       * web with no project must not wipe a project attached in the panel: they are
-       * two doors to the same setting, and coming through one should not clear what
-       * the other did.
-       */
-      const project = a?.project;
       await storage.set({
         cloud: {
-          ...current,
-          ...(project
-            ? {
-                url: project.url,
-                anonKey: project.anonKey,
-                accessToken: project.accessToken,
-                refreshToken: project.refreshToken,
-                userId: project.userId,
-              }
-            : {}),
           email: a?.email ?? '',
           directory: a?.directory,
           demo: a?.demo,
           guest: a?.guest,
           sessionId: a?.sessionId,
-          host: a?.host,
-        },
+        } satisfies CloudSettings,
       });
-      record(
-        'done',
-        a ? `Signed in as ${a.email || 'demo'}${project ? ` · project ${new URL(project.url).host}` : ''}` : 'Signed out',
-      );
+      record('done', a ? `Signed in as ${a.email || 'demo'}` : 'Signed out');
       return { ok: true };
     }
 
@@ -398,21 +247,7 @@ async function handle(request: Request): Promise<unknown> {
         demo: c.demo,
         guest: c.guest,
         directory: c.directory,
-        // Reported back so the panel can say whether a corpus can be hosted at all,
-        // whichever door the project came through.
-        ...(c.url && c.anonKey && c.accessToken
-          ? {
-              project: {
-                url: c.url,
-                anonKey: c.anonKey,
-                accessToken: c.accessToken,
-                refreshToken: c.refreshToken ?? '',
-                userId: c.userId ?? '',
-              },
-            }
-          : {}),
         sessionId: c.sessionId,
-        host: c.host,
       };
     }
 
@@ -430,9 +265,6 @@ async function handle(request: Request): Promise<unknown> {
     case 'createSession': {
       const dir = request.cloud.directory;
       if (!dir) throw new Error('Sign in first — a session needs an owner.');
-      if (!request.cloud.url || !request.cloud.anonKey) {
-        throw new Error('Connect your own Supabase project first; a session is stored in it.');
-      }
       /*
        * Short and unambiguous. No 0/O or 1/I, because this gets read aloud and
        * typed by hand, and a code that cannot be dictated is not shareable.
@@ -448,36 +280,11 @@ async function handle(request: Request): Promise<unknown> {
         email: request.cloud.email ?? '',
         userId: dir.userId,
       };
-      /*
-       * The corpus row first, and the order is the whole point.
-       *
-       * Two rows make a shared session. The one in the owner's own project is what
-       * actually authorises anything — every policy there reads `shared` from it —
-       * while the directory only records that a code exists and who owns it.
-       *
-       * Published first, a failure here left a joinable code pointing at a project
-       * with no matching session: members resolved the code, reached the database,
-       * matched no policy, and saw an empty corpus with nothing anywhere saying
-       * why. The owner saw their own passages the whole time, because they match on
-       * `user_id` instead, so nothing looked wrong from their side either.
-       *
-       * This way a failure leaves a session that is merely private, which is the
-       * safe direction and is visible to the person who caused it.
-       */
-      await createLocalSession(
-        { url: request.cloud.url, anonKey: request.cloud.anonKey },
-        {
-          accessToken: request.cloud.accessToken!,
-          refreshToken: request.cloud.refreshToken!,
-          email: request.cloud.email ?? '',
-          userId: request.cloud.userId ?? '',
-        },
-        { id: code, name: request.name, shared: true },
-      );
       await publishSession(dirSession, {
         code,
         name: request.name,
         openJoin: request.openJoin,
+        shared: true,
         ownerUserId: dir.userId,
       });
       record('done', `Created session ${request.name} (${code})`);
@@ -487,29 +294,25 @@ async function handle(request: Request): Promise<unknown> {
     case 'joinSession': {
       const dir = request.cloud.directory;
       const code = request.code.trim().toUpperCase();
-      const resolved = await resolveSession(
-        code,
-        dir
-          ? {
-              accessToken: dir.accessToken,
-              refreshToken: dir.refreshToken,
-              email: request.cloud.email ?? '',
-              userId: dir.userId,
-            }
-          : undefined,
-      );
+      if (!dir) throw new Error('Sign in first — joining a session needs an account, even a demo one.');
+      const found = await findSession(code, {
+        accessToken: dir.accessToken,
+        refreshToken: dir.refreshToken,
+        email: request.cloud.email ?? '',
+        userId: dir.userId,
+      });
       /*
-       * One message for "no such code" and for "not yours to join", because
-       * `credentials_for` deliberately does not distinguish them — telling them
-       * apart would make this an oracle for which codes are real.
+       * One message for "no such code" and for "not yours to join", because RLS
+       * deliberately does not distinguish them — telling them apart would make
+       * this an oracle for which codes are real.
        */
-      if (!resolved) {
+      if (!found) {
         throw new Error(
           'No session with that code, or you have not been invited to it. Ask the owner to invite your email address.',
         );
       }
-      record('done', `Joined session ${code}`);
-      return { code, host: { url: resolved.projectUrl, anonKey: resolved.anonKey, name: code } };
+      record('done', `Joined session ${found.name} (${code})`);
+      return { code, name: found.name };
     }
 
     case 'inviteToSession': {
@@ -952,22 +755,30 @@ const storage = {
   },
 };
 
+/**
+ * The stored settings, in the current shape.
+ *
+ * Before there was one project, this object also carried a corpus project's URL
+ * and key, a second set of tokens for it, and a `host` for sessions living in
+ * somebody else's project. Storage writes merge rather than replace, so those
+ * fields linger in browsers that had them; reading through here means nothing
+ * ever acts on them.
+ */
+function normalizeCloud(raw: CloudSettings | undefined | null): CloudSettings {
+  const c = (raw ?? {}) as CloudSettings;
+  return {
+    email: c.email,
+    guest: c.guest,
+    demo: c.demo,
+    directory: c.directory,
+    sessionId: c.sessionId,
+  };
+}
+
 async function cloudSettings() {
-  /*
-   * Typed as `CloudSettings` rather than re-describing the shape inline. There
-   * were four hand-written copies of it, and adding `sessionId` to the protocol
-   * silently failed to reach any of them — the sync ran in the private scope
-   * while reporting that it had pushed rows to a shared session. One name means
-   * a new field is a compile error at every call site instead of a no-op.
-   */
-  const c = await storage.get<CloudSettings>('cloud');
-  if (!c) return null;
-  if (c.host) {
-    if (!c.sessionId || !c.host.url || !c.host.anonKey) return null;
-  } else if (!c.url || !c.anonKey || !c.accessToken || !c.refreshToken) {
-    return null;
-  }
-  return c;
+  const c = normalizeCloud(await storage.get<CloudSettings>('cloud'));
+  // Signed in or nothing to do: a guest's corpus stays on this device.
+  return c.directory ? c : null;
 }
 
 /**
@@ -981,38 +792,27 @@ async function cloudSettings() {
  * The refresh token is long-lived, so one retry covers it. If the refresh itself
  * fails the session is genuinely gone and the error says so.
  */
-async function syncWithRenewal(
-  c: NonNullable<Awaited<ReturnType<typeof cloudSettings>>>,
-  onProgress?: (m: string) => void,
-) {
-  /*
-   * A joined session lives in its host's project, so the credentials that reach it
-   * are theirs and not this person's. `host` is absent for your own sessions,
-   * where your own project is the right target.
-   */
-  const cfg = {
-    url: c.host?.url ?? c.url,
-    anonKey: c.host?.anonKey ?? c.anonKey,
-    ...(c.sessionId ? { sessionId: c.sessionId } : {}),
+async function syncWithRenewal(c: CloudSettings, onProgress?: (m: string) => void) {
+  const dir = c.directory!;
+  const cfg = backend(c.sessionId);
+  const session = {
+    accessToken: dir.accessToken,
+    refreshToken: dir.refreshToken,
+    email: c.email ?? '',
+    userId: dir.userId,
   };
-  const session = c.host
-    ? { accessToken: c.host.anonKey, refreshToken: '', email: '', userId: '' }
-    : {
-        accessToken: c.accessToken!,
-        refreshToken: c.refreshToken!,
-        email: c.email ?? '',
-        userId: c.userId ?? '',
-      };
   try {
     return await syncNow(cfg, session, onProgress);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!/jwt|expired|invalid token|401/i.test(message)) throw err;
-    if (c.host) throw err;
     record('working', 'Session expired — renewing');
     const renewed = await refreshSession(cfg, session);
     await storage.set({
-      cloud: { ...c, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
+      cloud: {
+        ...c,
+        directory: { ...dir, accessToken: renewed.accessToken, refreshToken: renewed.refreshToken },
+      },
     });
     return await syncNow(cfg, renewed, onProgress);
   }
