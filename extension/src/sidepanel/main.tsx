@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { OUTSIDE_MEMORY_NOTICE, splitOutsideMemory } from '@/src/rag/answer';
+import { BACKEND_UNAVAILABLE } from '@/src/rag/backend';
 import { PERSONAL } from '@/src/rag/sessions';
 import Sessions, { type SessionsApi, type SessionSummary } from '@/components/Sessions';
 import {
@@ -1754,6 +1755,17 @@ function SyncStatus() {
     return () => clearInterval(timer);
   }, []);
 
+  /*
+   * The footer is one line, so a paused server gets the short version here and
+   * the whole explanation on hover — the point to land is that nothing is lost.
+   */
+  if (state.error === BACKEND_UNAVAILABLE) {
+    return (
+      <span className="leaves" title={BACKEND_UNAVAILABLE}>
+        Server paused — your passages are safe here
+      </span>
+    );
+  }
   if (state.error) return <span className="leaves">Sync failed — {state.error}</span>;
   if (!state.at) return <span>Cloud connected · not synced yet</span>;
   const secs = Math.round((Date.now() - state.at) / 1000);

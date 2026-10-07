@@ -106,7 +106,14 @@ export default async function handler(request: Request): Promise<Response> {
   if (canCount) {
     try {
       const res = await fetch(`${rest}?select=count&key=eq.${key}`, { headers: authHeaders });
+      /*
+       * A paused project answers — with a gateway error, not rows. Reading that as
+       * "no usage yet" would make an outage an unmetered budget, so anything but a
+       * real array of rows counts as unreachable.
+       */
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rows = (await res.json()) as { count: number }[];
+      if (!Array.isArray(rows)) throw new Error('not rows');
       used = rows[0]?.count ?? 0;
     } catch {
       /*
@@ -114,7 +121,10 @@ export default async function handler(request: Request): Promise<Response> {
        * open here would mean an outage is also an unmetered budget, which is the
        * expensive direction to be wrong in.
        */
-      return json(503, { error: 'Cannot reach the usage counter, so the demo is paused.' });
+      return json(503, {
+        error:
+          'Autorag’s server is unreachable right now — its database is probably paused — so free demo answers are off. Search still works, and adding your own Anthropic key in Settings → Answers lets you keep asking.',
+      });
     }
     if (used >= MAX_ANSWERS) {
       return json(429, {

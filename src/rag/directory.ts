@@ -23,6 +23,7 @@
  */
 
 import type { CloudConfig, Session } from './sync';
+import { backendFetch } from './backend';
 
 export const DIRECTORY = {
   url: 'https://qkupjhuroorzijbfqdtv.supabase.co',
@@ -90,7 +91,7 @@ const SESSION_COLUMNS = 'code,name,open_join,shared,owner_user_id';
  * a client bug. Named here so it is reported as the setting it is.
  */
 export async function signInAnonymously(): Promise<Session> {
-  const res = await fetch(url('auth/v1/signup'), {
+  const res = await backendFetch(url('auth/v1/signup'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', apikey: DIRECTORY.publishableKey },
     body: '{}',
@@ -135,7 +136,7 @@ export async function signInAnonymously(): Promise<Session> {
  * what every passage's `user_id` refers to.
  */
 async function attempt(path: string, email: string, password: string) {
-  const res = await fetch(url(`auth/v1/${path}`), {
+  const res = await backendFetch(url(`auth/v1/${path}`), {
     method: 'POST',
     headers: { 'content-type': 'application/json', apikey: DIRECTORY.publishableKey },
     body: JSON.stringify({ email, password }),
@@ -236,7 +237,7 @@ export async function signInOrUp(email: string, password: string): Promise<Sessi
  * which codes are real.
  */
 export async function findSession(code: string, session: Session): Promise<DirectorySession | null> {
-  const res = await fetch(
+  const res = await backendFetch(
     url(`rest/v1/sessions?select=${SESSION_COLUMNS}&code=eq.${encodeURIComponent(code)}`),
     { headers: headers(session.accessToken) },
   );
@@ -259,7 +260,7 @@ export async function findSession(code: string, session: Session): Promise<Direc
  * by browsing.
  */
 export async function listOpenSessions(session?: Session): Promise<DirectorySession[]> {
-  const res = await fetch(
+  const res = await backendFetch(
     url(`rest/v1/sessions?select=${SESSION_COLUMNS}&open_join=is.true`),
     { headers: headers(session?.accessToken) },
   );
@@ -269,7 +270,7 @@ export async function listOpenSessions(session?: Session): Promise<DirectorySess
 
 /** Every session this person owns, including both private and open sessions. */
 export async function listSessions(session: Session): Promise<DirectorySession[]> {
-  const res = await fetch(
+  const res = await backendFetch(
     url(
       `rest/v1/sessions?select=${SESSION_COLUMNS}&owner_user_id=eq.${encodeURIComponent(session.userId)}`,
     ),
@@ -289,7 +290,7 @@ export async function publishSession(
   session: Session,
   input: { code: string; name: string; openJoin?: boolean; shared?: boolean; ownerUserId: string },
 ): Promise<void> {
-  const res = await fetch(url('rest/v1/sessions'), {
+  const res = await backendFetch(url('rest/v1/sessions'), {
     method: 'POST',
     headers: { ...headers(session.accessToken), Prefer: 'resolution=merge-duplicates' },
     body: JSON.stringify({
@@ -309,7 +310,7 @@ export async function inviteToSession(
   sessionCode: string,
   email: string,
 ): Promise<void> {
-  const res = await fetch(url('rest/v1/invites'), {
+  const res = await backendFetch(url('rest/v1/invites'), {
     method: 'POST',
     headers: { ...headers(session.accessToken), Prefer: 'resolution=merge-duplicates' },
     body: JSON.stringify({ session_code: sessionCode, email: email.trim().toLowerCase() }),

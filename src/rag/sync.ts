@@ -44,6 +44,7 @@ import {
   setActiveSession,
 } from './store';
 import { sessionOf } from './sessions';
+import { backendFetch } from './backend';
 
 export interface CloudConfig {
   url: string;
@@ -108,7 +109,7 @@ async function fail(res: Response): Promise<never> {
  * this module only ever renews a session it was handed.
  */
 export async function refresh(c: CloudConfig, session: Session): Promise<Session> {
-  const res = await fetch(auth(c, 'token?grant_type=refresh_token'), {
+  const res = await backendFetch(auth(c, 'token?grant_type=refresh_token'), {
     method: 'POST',
     headers: headers(c),
     body: JSON.stringify({ refresh_token: session.refreshToken }),
@@ -199,7 +200,7 @@ async function upsert(c: CloudConfig, s: Session, table: string, rows: unknown[]
   // Chunked because PostgREST and the network both dislike one enormous body, and
   // a first sync of a full corpus is exactly when this runs.
   for (let i = 0; i < rows.length; i += 250) {
-    const res = await fetch(rest(c, table), {
+    const res = await backendFetch(rest(c, table), {
       method: 'POST',
       headers: { ...headers(c, s), Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(rows.slice(i, i + 250)),
@@ -219,7 +220,7 @@ async function upsert(c: CloudConfig, s: Session, table: string, rows: unknown[]
 const scope = (c: CloudConfig) => `session_id=eq.${encodeURIComponent(sessionOf(c.sessionId))}`;
 
 async function selectAll<T>(c: CloudConfig, s: Session, table: string): Promise<T[]> {
-  const res = await fetch(rest(c, `${table}?select=*&${scope(c)}`), { headers: headers(c, s) });
+  const res = await backendFetch(rest(c, `${table}?select=*&${scope(c)}`), { headers: headers(c, s) });
   if (!res.ok) await fail(res);
   return (await res.json()) as T[];
 }
@@ -297,7 +298,7 @@ export async function syncNow(
       const ids = deletions.filter((d) => d.kind === kind).map((d) => d.id);
       if (!ids.length) continue;
       const table = kind === 'source' ? 'sources' : 'chunks';
-      const res = await fetch(rest(c, `${table}?id=in.(${ids.join(',')})&${scope(c)}`), {
+      const res = await backendFetch(rest(c, `${table}?id=in.(${ids.join(',')})&${scope(c)}`), {
         method: 'DELETE',
         headers: headers(c, s),
       });
