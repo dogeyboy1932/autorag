@@ -1362,6 +1362,80 @@ function Hit({
   );
 }
 
+/** Short names for the shortcut list — the manifest's descriptions are written for the browser's settings page. */
+const SHORTCUT_LABELS: Record<string, string> = {
+  'keep-selection': 'Keep highlight',
+  'keep-page': 'Keep whole page',
+  'open-panel': 'Open this panel',
+  'ask-memory': 'Ask a question',
+  'approve-latest': 'Approve newest',
+};
+
+/**
+ * The keyboard shortcuts, read live from the browser.
+ *
+ * Live rather than copied from the manifest, because the browser is the authority:
+ * it drops defaults it considers taken, and a person can rebind any of them. A list
+ * that printed the defaults would be wrong for exactly the people who changed one.
+ *
+ * A header chip that opens a small sheet, so it costs one word of header until
+ * someone wants it.
+ */
+function Shortcuts() {
+  const [open, setOpen] = useState(false);
+  const [keys, setKeys] = useState<chrome.commands.Command[]>([]);
+  useEffect(() => {
+    if (open) void chrome.commands.getAll().then(setKeys);
+  }, [open]);
+  const order = Object.keys(SHORTCUT_LABELS);
+  const shown = keys
+    .filter((k) => k.name && SHORTCUT_LABELS[k.name])
+    .sort((a, b) => order.indexOf(a.name!) - order.indexOf(b.name!));
+
+  // Closes on any click outside it, like every other small sheet people know.
+  const anchor = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!anchor.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    return () => document.removeEventListener('mousedown', away);
+  }, [open]);
+
+  return (
+    <span className="keys-anchor" ref={anchor}>
+      <span className="chip" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }} title="Keyboard shortcuts">
+        keys
+      </span>
+      {open && (
+        <div className="chip-detail keys">
+          {shown.map((k) => (
+            <div key={k.name} className="key-row">
+              <span>{SHORTCUT_LABELS[k.name!]}</span>
+              {k.shortcut ? (
+                <span className="key-combo">
+                  {k.shortcut.split('+').map((part) => (
+                    <kbd key={part}>{part}</kbd>
+                  ))}
+                </span>
+              ) : (
+                <span className="soft">not set</span>
+              )}
+            </div>
+          ))}
+          <button
+            className="key-change"
+            onClick={() => void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })}
+          >
+            Change keys
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
+
 interface RecallResult {
   answer?: string;
   hits: { chunk: { id?: string; text: string }; source: { url: string; title: string } }[];
@@ -2050,6 +2124,7 @@ function App() {
           <AccountGate account={account} cloud={cloud} onRecheck={recheckAccount} />
           <ModelStatus stats={stats} />
           <WebmcpStatus />
+          <Shortcuts />
         </div>
       </header>
 

@@ -219,6 +219,17 @@ kbd { background: var(--bg); border: 1px solid var(--border); border-bottom-widt
 }
 
 .chip-detail .note { margin: 0 0 8px; }
+
+/* Shortcuts: one tight row per key, label left, keys right. The anchor carries the
+   positioning because `.chip` clips its overflow, which would swallow the sheet. */
+.keys-anchor { position: relative; display: inline-flex; }
+.chip-detail.keys { width: 228px; padding: 8px 10px; }
+.key-row > span:first-child { white-space: nowrap; }
+.key-row { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; font-size: 11.5px; padding: 3px 0; }
+.key-combo { display: inline-flex; gap: 2px; flex: none; }
+.key-combo kbd { font-size: 10px; padding: 0 3px; }
+.key-change { margin-top: 6px; width: 100%; font-size: 11px; padding: 4px 8px; }
 .chip-detail .note:last-child { margin-bottom: 0; }
 
 /* A disclosure heading's current value, carried at lower weight so the row reads
