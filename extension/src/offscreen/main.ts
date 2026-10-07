@@ -33,6 +33,7 @@ import { isEnvelope, type CloudSettings, type Event, type Request, type Response
 import { askModel, splitOutsideMemory, standaloneQuery } from '@/src/rag/answer';
 import { refresh as refreshSession, syncNow } from '@/src/rag/sync';
 import {
+  accountSignOut,
   backend,
   directoryConfigured,
   findSession,
@@ -214,7 +215,23 @@ async function handle(request: Request): Promise<unknown> {
       };
     }
 
+    /*
+     * Signing out from the panel itself.
+     *
+     * Identity normally arrives from the web app, and so does signing out — but
+     * that message is fire-and-forget, and when the extension did not answer it the
+     * panel stayed signed in to an account the web app had already left. This is
+     * the failsafe: it clears the account here no matter what the web app did.
+     *
+     * Passages stay. They live in this browser and are its person's; signing out
+     * stops them syncing, it does not take them away.
+     */
     case 'signOut': {
+      const c = normalizeCloud(await storage.get<CloudSettings>('cloud'));
+      if (c.directory) await accountSignOut(c.directory.accessToken);
+      // Replaced, not merged: a merge cannot clear a field. See background.ts.
+      await storage.set({ cloud: { email: '' } satisfies CloudSettings }, { replace: true });
+      setActiveSession(undefined);
       record('done', 'Signed out');
       return { ok: true };
     }
@@ -229,7 +246,7 @@ async function handle(request: Request): Promise<unknown> {
           guest: a?.guest,
           sessionId: a?.sessionId,
         } satisfies CloudSettings,
-      });
+      }, { replace: true });
       record('done', a ? `Signed in as ${a.email || 'demo'}` : 'Signed out');
       return { ok: true };
     }
@@ -750,8 +767,9 @@ const storage = {
       | undefined;
     return v?.[key];
   },
-  async set(patch: Record<string, unknown>): Promise<void> {
-    await chrome.runtime.sendMessage({ type: 'autorag:storage-set', patch });
+  /** Merges into what is stored, unless `replace` — see the handler for why both exist. */
+  async set(patch: Record<string, unknown>, opts: { replace?: boolean } = {}): Promise<void> {
+    await chrome.runtime.sendMessage({ type: 'autorag:storage-set', patch, replace: opts.replace });
   },
 };
 

@@ -1566,12 +1566,14 @@ function AccountGate({
   cloud,
   onRecheck,
   onGuest,
+  onSignOut,
 }: {
   account: AccountState | null;
   /** Live settings, so the session named here is the one being written to. */
   cloud?: CloudSettings;
   onRecheck: () => void;
   onGuest?: () => void;
+  onSignOut?: () => void;
 }) {
   if (account) {
     /*
@@ -1591,6 +1593,15 @@ function AccountGate({
         <span className={session === PERSONAL ? 'session-chip' : 'session-chip shared'}>
           {session === PERSONAL ? 'personal' : session}
         </span>
+        {onSignOut && (
+          <>
+            {' · '}
+            {/* Same words as the web app's account bar: guests and demos "exit". */}
+            <button className="linky" onClick={onSignOut}>
+              {account.guest || account.demo ? 'exit' : 'sign out'}
+            </button>
+          </>
+        )}
       </p>
     );
   }
@@ -1870,7 +1881,12 @@ function App() {
       <header>
         <h1>Autorag</h1>
         <div className="chips">
-          <AccountGate account={account} cloud={cloud} onRecheck={recheckAccount} />
+          <AccountGate
+            account={account}
+            cloud={cloud}
+            onRecheck={recheckAccount}
+            onSignOut={() => void ask({ kind: 'signOut' }).then(recheckAccount)}
+          />
           <ModelStatus stats={stats} />
           <WebmcpStatus />
           <Shortcuts />

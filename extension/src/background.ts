@@ -340,17 +340,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse(await chrome.storage.local.get(message.key));
       return;
     }
-    // Merge rather than replace: callers patch one field of `cloud` and would
-    // otherwise silently drop the tokens sitting beside it.
+    /*
+     * Merge by default: callers patch one field of `cloud` and would otherwise
+     * silently drop the tokens sitting beside it.
+     *
+     * `replace` is for writing a whole object — signing in or out. A merge cannot
+     * *clear* a field: runtime messages are JSON, so `directory: undefined` never
+     * arrives, and the old value sitting under it survives. That is how signing
+     * out of the web app left the panel signed in to the account just left.
+     */
     const key = Object.keys(message.patch ?? {})[0];
     if (key) {
-      const current = (await chrome.storage.local.get(key)) as Record<string, unknown>;
       const value = message.patch[key];
-      const merged =
-        value && typeof value === 'object' && !Array.isArray(value)
-          ? { ...((current[key] as object) ?? {}), ...value }
-          : value;
-      await chrome.storage.local.set({ [key]: merged });
+      if (message.replace) {
+        await chrome.storage.local.set({ [key]: value });
+      } else {
+        const current = (await chrome.storage.local.get(key)) as Record<string, unknown>;
+        const merged =
+          value && typeof value === 'object' && !Array.isArray(value)
+            ? { ...((current[key] as object) ?? {}), ...value }
+            : value;
+        await chrome.storage.local.set({ [key]: merged });
+      }
     }
     sendResponse({ ok: true });
   })();

@@ -217,6 +217,20 @@ export async function accountSignUp(email: string, password: string): Promise<Se
   };
 }
 
+/**
+ * Ends this sign-in on the server, so the refresh token stops working too.
+ *
+ * Best-effort and silent: signing out has to succeed locally whether or not the
+ * server can be reached — a paused project must not keep anybody signed in.
+ */
+export async function accountSignOut(accessToken: string): Promise<void> {
+  try {
+    await backendFetch(url('auth/v1/logout'), { method: 'POST', headers: headers(accessToken) });
+  } catch {
+    /* local sign-out still happens */
+  }
+}
+
 /** Sign in, or create the account if there is genuinely none. Used by automation. */
 export async function signInOrUp(email: string, password: string): Promise<Session> {
   try {
